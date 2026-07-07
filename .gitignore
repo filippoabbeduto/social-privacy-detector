@@ -26,6 +26,8 @@ dist/
 *.pem
 *.key
 *.ppk
+# Certificati self-signed generati localmente/sull'EC2 (contengono la chiave privata)
+certs/
 
 # IDE
 .vscode/
