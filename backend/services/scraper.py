@@ -431,7 +431,10 @@ class ScraperService:
         Invoca un Actor Apify per estrarre dati da un profilo social reale.
         L'Actor è selezionato automaticamente in base alla piattaforma rilevata dall'URL.
         Usa l'endpoint sincrono run-sync-get-dataset-items con timeout di 180s.
-        In caso di errore o piattaforma non supportata, fallback su mock.
+        In caso di errore, piattaforma non supportata o profilo non accessibile
+        restituisce None (nessun dato). IMPORTANTE: in modalità reale NON si fa
+        fallback su dati mock — analizzare una bio inventata riporterebbe PII
+        false come reali. Il chiamante deve gestire None segnalando il fallimento.
         """
         platform = self._detect_platform(social_url)
 
@@ -440,7 +443,7 @@ class ScraperService:
                 f"[Apify] Piattaforma non riconosciuta per URL: {social_url}. "
                 f"Piattaforme supportate: {', '.join(self.SUPPORTED_PLATFORMS)}"
             )
-            return self._scrape_mock(social_url)
+            return None
 
         config = PLATFORM_CONFIGS[platform]
         actor_id = config["actor_id"]
@@ -469,15 +472,24 @@ class ScraperService:
 
             items = response.json()
             if not items:
-                logger.warning(f"[Apify] Nessun risultato per {social_url}. Fallback su mock.")
-                return self._scrape_mock(social_url)
+                logger.warning(f"[Apify] Nessun risultato per {social_url} (profilo privato/inesistente?).")
+                return None
+
+            # Profilo inesistente/privato: diversi Actor (es. instagram-profile-scraper)
+            # NON restituiscono lista vuota ma un item con campo "error"
+            # (es. {"error":"not_found"}). Se TUTTI gli item sono errori non ci sono
+            # dati reali → None (evita di "estrarre" solo lo username e analizzarlo).
+            if all(isinstance(it, dict) and it.get("error") for it in items):
+                err = items[0].get("error")
+                logger.warning(f"[Apify] Profilo non accessibile per {social_url} (error={err}).")
+                return None
 
             # Estrai il testo con il parser specifico della piattaforma
             combined = config["extract_text"](items)
 
             if not combined.strip():
-                logger.warning(f"[Apify] Testo estratto vuoto per {social_url}. Fallback su mock.")
-                return self._scrape_mock(social_url)
+                logger.warning(f"[Apify] Testo estratto vuoto per {social_url}.")
+                return None
 
             logger.info(
                 f"[Apify] Scraping completato per {platform}. "
@@ -486,5 +498,5 @@ class ScraperService:
             return combined
 
         except Exception as e:
-            logger.error(f"[Apify] Errore scraping {platform}: {e}. Fallback su mock.")
-            return self._scrape_mock(social_url)
+            logger.error(f"[Apify] Errore scraping {platform}: {e}. Nessun dato restituito.")
+            return None

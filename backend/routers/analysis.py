@@ -78,10 +78,26 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
         if AWS_MOCK:
             time.sleep(3)
 
-        # Step 1: Scraping del profilo
+        # Step 1: Scraping del profilo. Se il client non fornisce già il testo,
+        # lo recuperiamo via scraper. In modalità reale uno scrape fallito
+        # (profilo privato/inesistente/irraggiungibile, piattaforma non supportata)
+        # restituisce None: in quel caso NON proseguiamo l'analisi su dati inventati
+        # — segnaliamo il job come FAILED con un messaggio chiaro. Analizzare una
+        # bio mock riporterebbe PII false come reali (problema di integrità dati).
         target_text = scraped_content
         if not target_text:
             target_text = scraper_service.scrape_profile(social_url)
+            if not target_text or not target_text.strip():
+                logger.warning(
+                    f"[Worker] Scraping senza dati per {social_url}: profilo non accessibile."
+                )
+                storage_service.fail_job(
+                    analysis_id,
+                    "Profilo non accessibile: potrebbe essere privato, inesistente o "
+                    "irraggiungibile, oppure la piattaforma non è supportata. "
+                    "Nessun dato da analizzare."
+                )
+                return
 
         # Step 2: Estrazione PII (raw, con duplicati — servono allo scorer)
         raw_piis = pii_service.detect_pii(target_text or "")
