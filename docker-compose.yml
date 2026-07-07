@@ -1,0 +1,93 @@
+# ==============================================================================
+# SOCIAL PRIVACY DETECTOR - Docker Compose Configuration
+# For University Project: Sistimi Distribuiti e Cloud Computing (SDCC)
+# ==============================================================================
+
+# NOTA: rimosso l'attributo "version" (es. '3.8'): è obsoleto in Docker Compose v2
+# e generava un warning. Lo schema del file è ora quello del Compose Spec corrente.
+
+services:
+  # 🌐 Frontend Microservice: React + Vite served via Nginx (Multi-Stage Build)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: social-privacy-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - sdcc-network
+    # Fix resilienza: il frontend parte solo quando il backend è SANO
+    # (healthcheck OK), non appena il container è avviato. Evita finestre in cui
+    # la UI è raggiungibile ma le API rispondono ancora errori.
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ⚙️ Backend Microservice: FastAPI Python (Uvicorn ASGI and AWS Boto3 SDK)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: social-privacy-backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      # Optional: mount local code for hot-reloading during offline development
+      - ./backend:/app
+    # Le variabili sono lette dal file passato con --env-file (in locale .env,
+    # su EC2 .env.production). Usiamo la sostituzione ${VAR:-default}: se il file
+    # non definisce una variabile si ricade sul default mock, così lo sviluppo
+    # offline funziona anche senza .env. Con .env reale (AWS_MOCK=false) i
+    # container usano i servizi AWS veri: PRIMA era hardcoded a true e ignorava .env.
+    environment:
+      - ENV=${ENV:-development}
+      - AWS_MOCK=${AWS_MOCK:-true}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-mock_access_key}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-mock_secret_key}
+      - DYNAMODB_TABLE=${DYNAMODB_TABLE:-SocialPrivacyAnalyses}
+      - S3_BUCKET=${S3_BUCKET:-social-privacy-reports}
+      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-us.anthropic.claude-sonnet-4-5-20250929-v1:0}
+      - APIFY_API_TOKEN=${APIFY_API_TOKEN:-mock_apify_token}
+    networks:
+      - sdcc-network
+    # Fix resilienza: healthcheck del backend.
+    # Docker (e domani AWS/ECS) usa l'esito per sapere se il container è sano e,
+    # con restart:unless-stopped, riavviarlo se diventa non responsivo.
+    # Usiamo Python (già presente nell'immagine python:3.12-slim) invece di curl,
+    # che NON è installato nell'immagine slim: un healthcheck basato su curl
+    # fallirebbe sempre con "command not found".
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 30s      # frequenza del controllo
+      timeout: 10s       # tempo max di attesa della risposta
+      retries: 3         # tentativi falliti consecutivi prima di marcare "unhealthy"
+      start_period: 40s  # grace period iniziale mentre l'app fa il boot (no fail durante l'avvio)
+
+  # 🔄 Reverse Proxy: Nginx serving as the single entrypoint (Edge Router)
+  nginx:
+    image: nginx:alpine
+    container_name: social-privacy-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    # Fix resilienza: il reverse proxy parte quando il frontend è avviato e il
+    # backend è SANO. Così il singolo entrypoint (porta 80) non inizia a
+    # instradare traffico prima che i servizi a valle siano pronti.
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    networks:
+      - sdcc-network
+
+# 📡 Networks: Private bridge network for container-to-container communication
+networks:
+  sdcc-network:
+    driver: bridge

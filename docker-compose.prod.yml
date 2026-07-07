@@ -1,0 +1,81 @@
+# ==============================================================================
+# SOCIAL PRIVACY DETECTOR - Docker Compose PRODUZIONE (EC2)
+# ==============================================================================
+# Differenze rispetto al docker-compose.yml di sviluppo:
+#   - USA immagini gia' buildate e pushate su Amazon ECR (image:), NON build:.
+#     Su EC2 non c'e' il codice sorgente: le immagini arrivano da ECR con
+#     `docker compose pull` (vedi .github/workflows/deploy.yml).
+#   - NIENTE bind-mount ./backend:/app: coprirebbe il codice dell'immagine.
+#   - NIENTE chiavi AWS: sull'EC2 boto3 usa l'IAM Instance Profile del ruolo
+#     allegato all'istanza. Mettere qui chiavi mock ROMPEREBBE l'accesso reale.
+#
+# Uso su EC2 (nella cartella che contiene questo file, nginx.conf e .env.production):
+#   docker compose -f docker-compose.prod.yml --env-file .env.production pull
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# NOTA: aggiorna l'account ID (569103037849) e la regione (us-east-1) se cambiano.
+# ==============================================================================
+
+services:
+  # 🌐 Frontend: immagine buildata su ECR
+  frontend:
+    image: 569103037849.dkr.ecr.us-east-1.amazonaws.com/social-privacy-frontend:latest
+    container_name: social-privacy-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - sdcc-network
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ⚙️ Backend: immagine buildata su ECR
+  backend:
+    image: 569103037849.dkr.ecr.us-east-1.amazonaws.com/social-privacy-backend:latest
+    container_name: social-privacy-backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    # Variabili lette da .env.production (--env-file). NIENTE AWS_ACCESS_KEY_ID /
+    # AWS_SECRET_ACCESS_KEY: in loro assenza boto3 usa l'IAM Instance Profile
+    # dell'EC2 (piu' sicuro, nessuna chiave sul disco). AWS_MOCK default false in prod.
+    environment:
+      - ENV=${ENV:-production}
+      - AWS_MOCK=${AWS_MOCK:-false}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - DYNAMODB_TABLE=${DYNAMODB_TABLE:-SocialPrivacyAnalyses}
+      - S3_BUCKET=${S3_BUCKET:-social-privacy-reports}
+      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-us.anthropic.claude-sonnet-4-5-20250929-v1:0}
+      - APIFY_API_TOKEN=${APIFY_API_TOKEN:-mock_apify_token}
+    networks:
+      - sdcc-network
+    # Stesso healthcheck dello sviluppo: l'immagine slim non ha curl, si usa Python.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 🔄 Reverse Proxy Nginx: unico entrypoint sulla porta 80.
+  # nginx.conf deve essere presente accanto a questo file sull'EC2.
+  nginx:
+    image: nginx:alpine
+    container_name: social-privacy-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    networks:
+      - sdcc-network
+
+networks:
+  sdcc-network:
+    driver: bridge

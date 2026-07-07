@@ -1,0 +1,8 @@
+# ==============================================================================
+# BACKEND DEV/TEST REQUIREMENTS (SDCC)
+# Dipendenze usate SOLO per i test, NON incluse nell'immagine Docker di
+# produzione (che installa il solo requirements.txt) per tenerla leggera.
+# Uso:  cd backend && pip install -r requirements-dev.txt && python -m pytest
+# ==============================================================================
+
+pytest==9.1.1

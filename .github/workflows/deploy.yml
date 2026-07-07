@@ -1,0 +1,85 @@
+# ==============================================================================
+# CI/CD Pipeline - Social Privacy Detector (SDCC)
+# Build Docker images, push to Amazon ECR, deploy to EC2 via SSH
+# ==============================================================================
+
+name: Build & Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+
+env:
+  # us-east-1: stessa regione dei servizi AWS del progetto (Bedrock/Claude,
+  # Comprehend, DynamoDB, S3). ECR ed EC2 devono stare qui per coerenza.
+  AWS_REGION: us-east-1
+  ECR_FRONTEND: social-privacy-frontend
+  ECR_BACKEND: social-privacy-backend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout del codice sorgente
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Configurazione credenziali AWS
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 3. Login ad Amazon ECR
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 4. Build e Push immagine Frontend
+      - name: Build & Push Frontend Image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_FRONTEND:latest -t $ECR_REGISTRY/$ECR_FRONTEND:${{ github.sha }} ./frontend
+          docker push $ECR_REGISTRY/$ECR_FRONTEND:latest
+          docker push $ECR_REGISTRY/$ECR_FRONTEND:${{ github.sha }}
+
+      # 5. Build e Push immagine Backend
+      - name: Build & Push Backend Image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_BACKEND:latest -t $ECR_REGISTRY/$ECR_BACKEND:${{ github.sha }} ./backend
+          docker push $ECR_REGISTRY/$ECR_BACKEND:latest
+          docker push $ECR_REGISTRY/$ECR_BACKEND:${{ github.sha }}
+
+      # 6. Deploy su EC2 via SSH
+      - name: Deploy to EC2 Instance
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Login ad ECR dall'EC2
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.ecr-login.outputs.registry }}
+
+            # Aggiorna e riavvia i container. La cartella /home/ec2-user/app deve
+            # contenere: docker-compose.prod.yml, nginx.conf, .env.production
+            # (copiati a mano sull'EC2 durante il setup — NON nel repo).
+            cd /home/ec2-user/app
+            docker compose -f docker-compose.prod.yml --env-file .env.production pull
+            # Fix deploy produzione: avvio col compose di PRODUZIONE (immagini ECR,
+            # no bind-mount, no chiavi AWS → IAM role) e --env-file .env.production.
+            # Il file .env.production risiede SOLO sull'EC2 (non è nel repo) e
+            # contiene la configurazione reale: AWS_MOCK=false e i nomi delle
+            # risorse AWS. Senza --env-file il compose userebbe i default.
+            docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans
+
+            # Pulizia immagini vecchie
+            docker image prune -f
+
+            echo "Deploy completato con successo!"
