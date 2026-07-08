@@ -52,10 +52,12 @@
   --c-ink: #18181b;
   --c-muted: #71717a;
   --c-faint: #a1a1aa;
-  --c-accent: #be4a2f;
+  /* Accento NEUTRO (inchiostro scuro): i bottoni/azioni non competono con la
+     scala calda del rischio. Il colore saturo resta ESCLUSIVAMENTE al rischio. */
+  --c-accent: #18181b;
   --c-accentink: #ffffff;
-  /* Colori rischio vividi e marcati (rosso/ambra/verde pieni), ben staccati dal
-     terracotta dell'accento e con buon contrasto su bianco. */
+  /* Colori rischio vividi e marcati (rosso/ambra/verde pieni), ben distinti tra
+     loro e con buon contrasto su bianco. */
   --c-high: #dc2626;
   --c-med: #d97706;
   --c-low: #16a34a;
@@ -72,8 +74,9 @@
   --c-ink: #f4f4f5;
   --c-muted: #a1a1aa;
   --c-faint: #6b6b73;
-  --c-accent: #d1583c;
-  --c-accentink: #ffffff;
+  /* Accento neutro anche sullo scuro: chiaro su fondo nero (bottone quasi bianco). */
+  --c-accent: #f4f4f5;
+  --c-accentink: #0a0a0b;
   --c-high: #e2685a;
   --c-med: #e0aa52;
   --c-low: #63b17f;
