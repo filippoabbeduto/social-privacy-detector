@@ -110,6 +110,9 @@ def _instagram_images(items: list) -> list:
         if item.get("private"):
             continue  # profilo privato: post non accessibili
         owner = (item.get("username") or "").lower()
+        # Profilo pubblico SENZA post: latestPosts è vuoto → il ciclo non produce
+        # URL → 0 immagini, quindi si analizzano solo bio/username, esattamente
+        # come per un profilo privato. Nessun caso speciale da gestire.
         for post in (item.get("latestPosts") or []):
             post_owner = (post.get("ownerUsername") or "").lower()
             if owner and post_owner and post_owner != owner:
