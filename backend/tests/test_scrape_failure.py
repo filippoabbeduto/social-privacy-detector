@@ -13,8 +13,10 @@ def test_scrape_vuoto_marca_job_failed(monkeypatch):
     aid = "test-scrape-none"
     analysis.storage_service.create_job(aid, "https://instagram.com/inesistente")
 
-    # Simula profilo non accessibile: lo scraper non trova dati.
-    monkeypatch.setattr(analysis.scraper_service, "scrape_profile", lambda url: None)
+    # Simula profilo non accessibile: lo scraper non trova né testo né immagini.
+    monkeypatch.setattr(
+        analysis.scraper_service, "scrape_profile_with_images", lambda url: (None, [])
+    )
 
     analysis._run_analysis_pipeline(aid, "https://instagram.com/inesistente", scraped_content=None)
 
@@ -30,8 +32,8 @@ def test_scraped_content_fornito_dal_client_procede(monkeypatch):
 
     # Lo scraper NON deve nemmeno essere chiamato: il testo è già fornito.
     def _boom(url):
-        raise AssertionError("scrape_profile non doveva essere invocato")
-    monkeypatch.setattr(analysis.scraper_service, "scrape_profile", _boom)
+        raise AssertionError("lo scraper non doveva essere invocato")
+    monkeypatch.setattr(analysis.scraper_service, "scrape_profile_with_images", _boom)
 
     analysis._run_analysis_pipeline(
         aid,

@@ -19,7 +19,7 @@
 import os
 import re
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 logger = logging.getLogger("social-privacy-backend")
 
@@ -34,6 +34,8 @@ AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
 #   - actor_id:      identificativo dell'Actor nel marketplace Apify
 #   - build_input:   funzione che costruisce il payload JSON per l'Actor
 #   - extract_text:  funzione che estrae il testo dai risultati dell'Actor
+#   - extract_images: (opzionale) estrae gli URL delle immagini dei post, per
+#                     l'OCR retrospettivo via Textract. Se assente → nessuna immagine.
 
 PLATFORM_CONFIGS: Dict[str, Dict[str, Any]] = {}
 
@@ -44,6 +46,7 @@ def _register_platform(
     actor_id: str,
     build_input,
     extract_text,
+    extract_images=None,
 ):
     """Registra la configurazione di una piattaforma social."""
     PLATFORM_CONFIGS[name] = {
@@ -51,6 +54,7 @@ def _register_platform(
         "actor_id": actor_id,
         "build_input": build_input,
         "extract_text": extract_text,
+        "extract_images": extract_images,
     }
 
 
@@ -92,12 +96,23 @@ def _instagram_extract(items: list) -> str:
     return " | ".join(texts)
 
 
+def _instagram_images(items: list) -> list:
+    """URL delle immagini dei post (per OCR retrospettivo). Solo post con foto."""
+    urls = []
+    for item in items:
+        for post in (item.get("latestPosts") or []):
+            if post.get("type") in ("Image", "Sidecar") and post.get("displayUrl"):
+                urls.append(post["displayUrl"])
+    return urls
+
+
 _register_platform(
     name="instagram",
     url_patterns=["instagram.com"],
     actor_id="apify~instagram-profile-scraper",
     build_input=_instagram_input,
     extract_text=_instagram_extract,
+    extract_images=_instagram_images,
 )
 
 
@@ -323,11 +338,20 @@ class ScraperService:
 
     def scrape_profile(self, social_url: str) -> Optional[str]:
         """
-        Recupera il contenuto testuale pubblico di un profilo social.
-        Restituisce il testo combinato della bio + post recenti.
+        Recupera il solo testo pubblico del profilo (bio + post). Wrapper di
+        compatibilità: il testo delle immagini (OCR) è gestito a parte.
+        """
+        text, _ = self.scrape_profile_with_images(social_url)
+        return text
+
+    def scrape_profile_with_images(self, social_url: str) -> Tuple[Optional[str], List[str]]:
+        """
+        Recupera (testo pubblico, URL delle immagini dei post). Il chiamante può
+        poi passare le immagini a Textract per l'OCR retrospettivo. In mock mode
+        restituisce (testo simulato, []) — nessuna immagine da scaricare.
         """
         if AWS_MOCK or not self.apify_token or self.apify_token == "mock_apify_token":
-            return self._scrape_mock(social_url)
+            return self._scrape_mock(social_url), []
         return self._scrape_apify(social_url)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -426,15 +450,14 @@ class ScraperService:
     # IMPLEMENTAZIONE REALE: Apify REST API (Multi-Piattaforma)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _scrape_apify(self, social_url: str) -> Optional[str]:
+    def _scrape_apify(self, social_url: str) -> Tuple[Optional[str], List[str]]:
         """
         Invoca un Actor Apify per estrarre dati da un profilo social reale.
-        L'Actor è selezionato automaticamente in base alla piattaforma rilevata dall'URL.
-        Usa l'endpoint sincrono run-sync-get-dataset-items con timeout di 180s.
+        Restituisce (testo, URL immagini dei post). L'Actor è selezionato in base
+        alla piattaforma rilevata dall'URL. Endpoint sincrono, timeout 180s.
         In caso di errore, piattaforma non supportata o profilo non accessibile
-        restituisce None (nessun dato). IMPORTANTE: in modalità reale NON si fa
-        fallback su dati mock — analizzare una bio inventata riporterebbe PII
-        false come reali. Il chiamante deve gestire None segnalando il fallimento.
+        restituisce (None, []). IMPORTANTE: in modalità reale NON si fa fallback su
+        dati mock — analizzare una bio inventata riporterebbe PII false come reali.
         """
         platform = self._detect_platform(social_url)
 
@@ -443,7 +466,7 @@ class ScraperService:
                 f"[Apify] Piattaforma non riconosciuta per URL: {social_url}. "
                 f"Piattaforme supportate: {', '.join(self.SUPPORTED_PLATFORMS)}"
             )
-            return None
+            return None, []
 
         config = PLATFORM_CONFIGS[platform]
         actor_id = config["actor_id"]
@@ -473,7 +496,7 @@ class ScraperService:
             items = response.json()
             if not items:
                 logger.warning(f"[Apify] Nessun risultato per {social_url} (profilo privato/inesistente?).")
-                return None
+                return None, []
 
             # Profilo inesistente/privato: diversi Actor (es. instagram-profile-scraper)
             # NON restituiscono lista vuota ma un item con campo "error"
@@ -482,21 +505,25 @@ class ScraperService:
             if all(isinstance(it, dict) and it.get("error") for it in items):
                 err = items[0].get("error")
                 logger.warning(f"[Apify] Profilo non accessibile per {social_url} (error={err}).")
-                return None
+                return None, []
 
             # Estrai il testo con il parser specifico della piattaforma
             combined = config["extract_text"](items)
 
             if not combined.strip():
                 logger.warning(f"[Apify] Testo estratto vuoto per {social_url}.")
-                return None
+                return None, []
+
+            # URL delle immagini dei post (se la piattaforma li espone) per l'OCR.
+            extract_images = config.get("extract_images")
+            image_urls = extract_images(items) if extract_images else []
 
             logger.info(
-                f"[Apify] Scraping completato per {platform}. "
-                f"Items: {len(items)}, Lunghezza testo: {len(combined)} caratteri"
+                f"[Apify] Scraping completato per {platform}. Items: {len(items)}, "
+                f"testo: {len(combined)} char, immagini post: {len(image_urls)}"
             )
-            return combined
+            return combined, image_urls
 
         except Exception as e:
             logger.error(f"[Apify] Errore scraping {platform}: {e}. Nessun dato restituito.")
-            return None
+            return None, []

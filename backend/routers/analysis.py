@@ -18,7 +18,9 @@ import uuid
 import time
 import logging
 import threading
-from typing import Optional
+from typing import Optional, List
+
+import requests
 # NOTA: rimosso "import json" — era usato solo dal vecchio percorso SQS (ora
 # eliminato per coerenza architetturale, vedi _enqueue_job).
 
@@ -54,6 +56,35 @@ storage_service = StorageService()
 # mock e in produzione) — nessuna Lambda coinvolta.
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Numero massimo di immagini dei post su cui fare OCR (Textract) durante l'analisi
+# di un profilo. LIMITE ESSENZIALE PER I COSTI: senza, un profilo con migliaia di
+# post scaricherebbe e analizzerebbe ogni foto, esaurendo credito Apify/Textract.
+# Configurabile via env; default prudente.
+MAX_POST_IMAGES_OCR = int(os.getenv("MAX_POST_IMAGES_OCR", "5"))
+
+
+def _ocr_post_images(image_urls: List[str]) -> List[str]:
+    """
+    Scarica le prime MAX_POST_IMAGES_OCR immagini dei post e ne estrae il testo
+    con Amazon Textract (OCR retrospettivo). Cattura le PII testuali dentro le
+    foto (documenti, cartelli, screenshot), non solo nella biografia.
+    Ogni immagine è indipendente: un errore su una non blocca le altre.
+    """
+    texts: List[str] = []
+    for url in image_urls[:MAX_POST_IMAGES_OCR]:
+        try:
+            resp = requests.get(url, timeout=15)
+            if resp.ok and resp.content:
+                extracted = pii_service.extract_text_from_image(resp.content)
+                if extracted and extracted.strip():
+                    texts.append(extracted.strip())
+        except Exception as e:
+            logger.warning(f"[Textract] OCR immagine post fallito ({url[:60]}...): {e}")
+    if texts:
+        logger.info(f"[Textract] OCR post: testo estratto da {len(texts)} immagini.")
+    return texts
+
+
 def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: Optional[str]):
     """
     Worker che esegue l'intera pipeline di analisi in un thread daemon.
@@ -86,7 +117,7 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
         # bio mock riporterebbe PII false come reali (problema di integrità dati).
         target_text = scraped_content
         if not target_text:
-            target_text = scraper_service.scrape_profile(social_url)
+            target_text, image_urls = scraper_service.scrape_profile_with_images(social_url)
             if not target_text or not target_text.strip():
                 logger.warning(
                     f"[Worker] Scraping senza dati per {social_url}: profilo non accessibile."
@@ -98,6 +129,15 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
                     "Nessun dato da analizzare."
                 )
                 return
+
+            # OCR retrospettivo sulle immagini dei post (fino al limite configurato):
+            # il testo estratto viene aggiunto a quello analizzato, così le PII
+            # visibili DENTRO le foto (non solo nella bio) vengono rilevate.
+            ocr_texts = _ocr_post_images(image_urls)
+            if ocr_texts:
+                target_text += (
+                    "\n\n[Testo rilevato nelle immagini dei post]\n" + "\n".join(ocr_texts)
+                )
 
         # Step 2: Estrazione PII (raw, con duplicati — servono allo scorer)
         raw_piis = pii_service.detect_pii(target_text or "")
