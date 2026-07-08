@@ -1,1 +1,143 @@
+/* ==============================================================================
+   SOCIAL PRIVACY DETECTOR — Design system
+   Principio cromatico: l'interfaccia è MONOCROMATICA (inchiostro su fondo neutro).
+   Il colore saturo è riservato ESCLUSIVAMENTE alla severità del rischio
+   (alto/medio/basso), così l'occhio va al pericolo, non alla decorazione.
+   Temi chiaro/scuro commutati via attributo data-theme sull'elemento <html>.
+   ============================================================================== */
+
 @import "tailwindcss";
+
+/* Font bundled (nessuna dipendenza esterna, funzionano offline):
+   Space Grotesk = display (carattere tecnico), IBM Plex Sans = testo (umanista),
+   IBM Plex Mono = SOLO per i dati estratti dalla macchina (PII, score, ID). */
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/* Registra i token come utility Tailwind (bg-surface, text-ink, border-line, …).
+   I valori puntano a variabili commutate per tema più sotto → utility reattive. */
+@theme {
+  --font-display: "Space Grotesk", ui-sans-serif, sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-bg: var(--c-bg);
+  --color-surface: var(--c-surface);
+  --color-surface2: var(--c-surface2);
+  --color-line: var(--c-line);
+  --color-ink: var(--c-ink);
+  --color-muted: var(--c-muted);
+  --color-faint: var(--c-faint);
+  --color-invert: var(--c-invert);
+  --color-oninvert: var(--c-oninvert);
+
+  /* Colori del rischio: gli unici saturi dell'interfaccia. */
+  --color-high: var(--c-high);
+  --color-med: var(--c-med);
+  --color-low: var(--c-low);
+}
+
+/* Tema scuro (default) */
+:root,
+:root[data-theme="dark"] {
+  --c-bg: #0f1012;
+  --c-surface: #16181b;
+  --c-surface2: #1d1f23;
+  --c-line: #2a2d33;
+  --c-ink: #ece9e3;
+  --c-muted: #989ca3;
+  --c-faint: #676c73;
+  --c-invert: #ece9e3;   /* pulsante primario chiaro su fondo scuro */
+  --c-oninvert: #0f1012;
+  --c-high: #ec6a5e;
+  --c-med: #e0a83d;
+  --c-low: #57b581;
+  color-scheme: dark;
+}
+
+/* Tema chiaro — carta neutra fredda (deliberatamente NON crema, per evitare il
+   cliché del beige "AI-generated"). */
+:root[data-theme="light"] {
+  --c-bg: #f4f5f6;
+  --c-surface: #ffffff;
+  --c-surface2: #eef0f2;
+  --c-line: #e1e4e8;
+  --c-ink: #17191c;
+  --c-muted: #596069;
+  --c-faint: #8b9199;
+  --c-invert: #17191c;   /* pulsante primario scuro su fondo chiaro */
+  --c-oninvert: #ffffff;
+  --c-high: #cf4335;
+  --c-med: #a9781a;
+  --c-low: #2d8a55;
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    border-color: var(--c-line);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--c-bg);
+    color: var(--c-ink);
+    font-family: var(--font-sans);
+    /* Transizione morbida al cambio tema */
+    transition: background-color 0.35s ease, color 0.35s ease;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--c-ink);
+    color: var(--c-bg);
+  }
+  /* Focus visibile per accessibilità (navigazione da tastiera) */
+  :focus-visible {
+    outline: 2px solid var(--c-ink);
+    outline-offset: 2px;
+  }
+}
+
+/* ── Signature: barra di redazione che si ritrae rivelando il dato esposto ─────
+   Il valore reale sta sotto; la barra (color inchiostro) lo copre e si "apre"
+   da sinistra verso destra, come una censura rimossa. */
+.redact {
+  position: relative;
+  display: inline-block;
+}
+.redact > .redact-bar {
+  position: absolute;
+  inset: 0;
+  background: var(--c-ink);
+  border-radius: 2px;
+  transform-origin: right center;
+  animation: redact-reveal 0.75s cubic-bezier(0.7, 0, 0.2, 1) forwards;
+}
+@keyframes redact-reveal {
+  0%, 45% { transform: scaleX(1); }
+  100% { transform: scaleX(0); }
+}
+
+/* Comparsa morbida dei blocchi risultato */
+.rise {
+  animation: rise 0.5s ease both;
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Rispetta chi ha ridotto le animazioni: niente moto, dato subito visibile. */
+@media (prefers-reduced-motion: reduce) {
+  .redact > .redact-bar { display: none; }
+  .rise { animation: none; }
+  body { transition: none; }
+}

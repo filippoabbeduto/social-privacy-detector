@@ -1,14 +1,33 @@
 <!doctype html>
-<html lang="en">
+<html lang="it">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Social Privacy Detector - SDCC 2025/26</title>
-    <meta name="description" content="Analisi dell'esposizione pubblica di dati personali sui social network - Progetto SDCC Unical" />
+    <title>Social Privacy Detector — SDCC Unical</title>
+    <meta
+      name="description"
+      content="Analisi dell'esposizione pubblica di dati personali (PII) sui profili social e stima dei vettori di ingegneria sociale. Progetto SDCC, Università della Calabria."
+    />
+    <!-- Imposta il tema PRIMA del render per evitare il flash di colore (FOUC).
+         Priorità: preferenza salvata dall'utente -> preferenza di sistema -> scuro. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("spd-theme");
+          if (t !== "light" && t !== "dark") {
+            t = window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+          }
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

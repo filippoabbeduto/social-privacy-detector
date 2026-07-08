@@ -1,59 +1,67 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   Shield,
-  Terminal,
-  Cpu,
-  AlertTriangle,
-  CheckCircle2,
+  Sun,
+  Moon,
   Search,
-  FileText,
-  Layers,
   RefreshCw,
-  ArrowRight,
   Trash2,
+  ArrowRight,
+  ChevronRight,
+  AlertTriangle,
+  ShieldCheck,
   Mail,
   Phone,
   MapPin,
-  ExternalLink,
-  BookOpen,
-  Info,
-  Server,
-  Activity,
-  ChevronRight
+  User,
+  Calendar,
+  Fingerprint,
+  Landmark,
+  Building2,
+  AtSign,
+  Link2,
+  Tag,
+  Cpu,
 } from "lucide-react";
 
-// Pre-configured templates to help the Unical Exam Commission quickly test different states
+// ─── Profili di esempio: popolano il form per provare i diversi livelli di rischio ───
 const DEMO_PROFILES = [
   {
-    label: "📸 Instagram — Alto Rischio (PII esposte)",
+    label: "Instagram — esposizione alta",
     url: "https://instagram.com/filippo_abbeduto_99",
-    content: "Studente alla Sapienza di Roma! Scrivimi a filippo.abb@sapienza.it per gli appunti o chiamami al 333-1234567. Nato il 15/03/1999 a Cosenza. Domani esame di Sistemi Distribuiti! 💻"
+    content:
+      "Studente alla Sapienza di Roma! Scrivimi a filippo.abb@sapienza.it per gli appunti o chiamami al 333-1234567. Nato il 15/03/1999 a Cosenza. Codice fiscale: ABBFPP99C15D086X.",
   },
   {
-    label: "🎵 TikTok — Alto Rischio (Routine geografica)",
+    label: "TikTok — routine geografica",
     url: "https://tiktok.com/@marco_vibes99",
-    content: "Studente UniCal a Cosenza. Nato il 22/06/2000. Giornata a Roma, sempre a Roma, amo Roma! Poi Roma di nuovo. Seguitemi su IG: @marco_vibes — Contatto collab: marco.vibes@gmail.com"
+    content:
+      "Studente UniCal a Cosenza. Nato il 22/06/2000. Giornata a Roma, sempre a Roma, amo Roma! Seguitemi su IG: @marco_vibes — collab: marco.vibes@gmail.com",
   },
   {
-    label: "💼 LinkedIn — Rischio Medio (Dati professionali)",
+    label: "LinkedIn — dati professionali",
     url: "https://linkedin.com/in/andrea-bianchi-cloud",
-    content: "Senior Cloud Engineer presso Accenture a Roma. Ex Deloitte Milano. Laurea Magistrale all'Università della Calabria. Contatto: andrea.bianchi@accenture.com | +39 347-9876543"
+    content:
+      "Senior Cloud Engineer presso Accenture a Roma. Ex Deloitte Milano. Laurea Magistrale all'Università della Calabria. Contatto: andrea.bianchi@accenture.com | +39 347-9876543",
   },
   {
-    label: "📘 Facebook — Rischio Medio (Dati personali)",
+    label: "Facebook — dati personali",
     url: "https://facebook.com/giulia.ferretti.95",
-    content: "Città: Napoli. Città natale: Cosenza. Studi: Università Federico II. Lavoro: Marketing Manager presso Enel. Compleanno: 10 agosto 1995. giulia.ferretti@enel.com"
+    content:
+      "Città: Napoli. Città natale: Cosenza. Studi: Università Federico II. Lavoro: Marketing Manager presso Enel. Compleanno: 10 agosto 1995. giulia.ferretti@enel.com",
   },
   {
-    label: "🐦 Twitter/X — Rischio Medio (Dev esposto)",
+    label: "Twitter/X — sviluppatore",
     url: "https://x.com/luca_dev_reply",
-    content: "Full-stack developer @Reply Milano. Oggi workshop su Kubernetes al Politecnico di Milano! Per collaborazioni: luca.dev@reply.it — Il mio blog: https://lucadev.tech"
+    content:
+      "Full-stack developer @Reply Milano. Oggi workshop su Kubernetes al Politecnico di Milano! Per collaborazioni: luca.dev@reply.it — blog: https://lucadev.tech",
   },
   {
-    label: "🛡️ Cyber-Aware (Basso Rischio)",
+    label: "Profilo consapevole — rischio basso",
     url: "https://twitter.com/cyber_shield_unical",
-    content: "Appassionato di OSINT e sicurezza informatica. Ricorda di limitare l'esposizione di informazioni identificabili sui tuoi canali pubblici!"
-  }
+    content:
+      "Appassionato di OSINT e sicurezza informatica. Ricorda di limitare l'esposizione di informazioni identificabili sui tuoi canali pubblici!",
+  },
 ];
 
 interface PIIEntity {
@@ -61,20 +69,17 @@ interface PIIEntity {
   text: string;
   score: number;
 }
-
 interface SocialEngineeringThreat {
   threat_vector: string;
   severity: string;
   explanation: string;
 }
-
 interface RiskAssessment {
   risk_level: string;
   explanation: string;
   score: number;
   motivations: string[];
 }
-
 interface AnalysisResult {
   analysis_id: string;
   social_url: string;
@@ -85,31 +90,69 @@ interface AnalysisResult {
   error?: string;
 }
 
+// Etichette leggibili + icona per ogni tipo di PII restituito dal backend.
+const PII_META: Record<string, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  NAME: { label: "Nome", Icon: User },
+  EMAIL: { label: "Email", Icon: Mail },
+  PHONE: { label: "Telefono", Icon: Phone },
+  PHONE_NUMBER: { label: "Telefono", Icon: Phone },
+  LOCATION: { label: "Luogo", Icon: MapPin },
+  ADDRESS: { label: "Indirizzo", Icon: MapPin },
+  DATE_OF_BIRTH: { label: "Data di nascita", Icon: Calendar },
+  DATE: { label: "Data", Icon: Calendar },
+  FISCAL_CODE: { label: "Codice fiscale", Icon: Fingerprint },
+  IBAN: { label: "IBAN", Icon: Landmark },
+  ORGANIZATION: { label: "Organizzazione", Icon: Building2 },
+  USERNAME: { label: "Username", Icon: AtSign },
+  URL: { label: "URL", Icon: Link2 },
+};
+const piiMeta = (type: string) => PII_META[type] || { label: type, Icon: Tag };
+
+// Mappa il livello di rischio testuale ai token di colore semantici (gli unici saturi).
+type RiskKey = "high" | "med" | "low";
+const riskInfo = (level: string): { key: RiskKey; label: string } => {
+  const l = (level || "").toUpperCase();
+  if (l === "HIGH") return { key: "high", label: "Alto" };
+  if (l === "MEDIUM") return { key: "med", label: "Medio" };
+  return { key: "low", label: "Basso" };
+};
+const RISK_TEXT: Record<RiskKey, string> = { high: "text-high", med: "text-med", low: "text-low" };
+const RISK_BG: Record<RiskKey, string> = { high: "bg-high", med: "bg-med", low: "bg-low" };
+const RISK_TINT: Record<RiskKey, string> = {
+  high: "bg-high/10 border-high/30",
+  med: "bg-med/10 border-med/30",
+  low: "bg-low/10 border-low/30",
+};
+
 export default function App() {
-  // Input states
+  // ─── Tema chiaro/scuro: legge quello già impostato dallo script inline in <head> ───
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const cur = typeof document !== "undefined" ? document.documentElement.getAttribute("data-theme") : null;
+    return cur === "light" ? "light" : "dark";
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("spd-theme", theme);
+    } catch {
+      /* localStorage non disponibile: ignora, il tema resta per la sessione */
+    }
+  }, [theme]);
+
+  // ─── Stato del form e dell'analisi ───
   const [socialUrl, setSocialUrl] = useState("");
   const [scrapedContent, setScrapedContent] = useState("");
-
-  // API and UI states
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
-
-  // Polling ref — mantiene il timer per il cleanup
+  const [activeTemplate, setActiveTemplate] = useState<number | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Active selected template for visual feedback
-  const [activeTemplate, setActiveTemplate] = useState<number | null>(null);
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
+  useEffect(() => () => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
   }, []);
 
-  // Quick fill function
   const applyTemplate = (index: number) => {
     setSocialUrl(DEMO_PROFILES[index].url);
     setScrapedContent(DEMO_PROFILES[index].content);
@@ -117,87 +160,62 @@ export default function App() {
     setError(null);
   };
 
-  // Polling: controlla lo stato del job ogni 3 secondi
+  // Polling dello stato del job ogni 3s finché COMPLETED o FAILED.
   const startPolling = (analysisId: string) => {
     if (pollingRef.current) clearInterval(pollingRef.current);
-
     pollingRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/analysis/${analysisId}`);
         if (!res.ok) throw new Error(`Polling error: ${res.status}`);
-
         const data: AnalysisResult = await res.json();
         setJobStatus(data.status);
-
         if (data.status === "COMPLETED") {
-          // Analisi completata — ferma il polling e mostra i risultati
-          if (pollingRef.current) clearInterval(pollingRef.current);
+          clearInterval(pollingRef.current!);
           pollingRef.current = null;
           setResult(data);
           setIsLoading(false);
         } else if (data.status === "FAILED") {
-          // Analisi fallita — ferma il polling e mostra l'errore
-          if (pollingRef.current) clearInterval(pollingRef.current);
+          clearInterval(pollingRef.current!);
           pollingRef.current = null;
-          setError(data.error || "Errore sconosciuto durante l'analisi.");
+          setError(data.error || "Analisi non riuscita.");
           setIsLoading(false);
         }
-        // PENDING / PROCESSING → continua il polling
-      } catch (err: any) {
-        console.error("Polling error:", err);
-        // Non fermare il polling per errori di rete temporanei
+      } catch (err) {
+        console.error("Polling error:", err); // errori di rete temporanei: non fermare il polling
       }
     }, 3000);
   };
 
-  // Main API submission logic (asincrona con polling)
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!socialUrl.trim()) {
-      setError("L'URL del profilo social è obbligatorio.");
+      setError("Inserisci l'indirizzo del profilo social da analizzare.");
       return;
     }
-
     setIsLoading(true);
     setError(null);
     setResult(null);
     setJobStatus("PENDING");
-
     try {
-      // 1. Invia la richiesta — il backend risponde 202 con l'analysis_id
       const response = await fetch("/api/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           social_url: socialUrl,
           scraped_content: scrapedContent.trim() ? scrapedContent : null,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error(`Errore del server: ${response.status} ${response.statusText}`);
-      }
-
+      if (!response.ok) throw new Error(`Il server ha risposto ${response.status}.`);
       const job = await response.json();
-
-      // 2. Avvia il polling per controllare lo stato
       startPolling(job.analysis_id);
-
     } catch (err: any) {
       console.error(err);
-      setError(
-        err.message ||
-        "Impossibile connettersi al backend FastAPI. Assicurati che Nginx e i container siano avviati."
-      );
+      setError(err.message || "Impossibile raggiungere il servizio di analisi. Riprova più tardi.");
       setIsLoading(false);
       setJobStatus(null);
     }
   };
 
-  // Reset Form
   const handleClear = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = null;
@@ -210,589 +228,408 @@ export default function App() {
     setIsLoading(false);
   };
 
-  // Helper to determine badge styling according to AWS risk assessment
-  const getRiskStyles = (level: string) => {
-    const uppercaseLevel = level.toUpperCase();
-    if (uppercaseLevel === "HIGH") {
-      return {
-        badge: "bg-red-500/10 text-red-400 border-red-500/30",
-        bg: "bg-red-950/20 border-red-900/30",
-        accentText: "text-red-400",
-        indicator: "bg-red-500",
-        label: "ALTO RISCHIO ESPOSIZIONE"
-      };
-    } else if (uppercaseLevel === "MEDIUM") {
-      return {
-        badge: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-        bg: "bg-amber-950/20 border-amber-900/30",
-        accentText: "text-amber-400",
-        indicator: "bg-amber-500",
-        label: "MEDIO RISCHIO ESPOSIZIONE"
-      };
-    } else {
-      return {
-        badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-        bg: "bg-emerald-950/20 border-emerald-900/30",
-        accentText: "text-emerald-400",
-        indicator: "bg-emerald-500",
-        label: "BASSO RISCHIO ESPOSIZIONE"
-      };
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-600 selection:text-white">
-
-      {/* ==============================================================================
-      # TOP HEADER BAR
-      ============================================================================== */}
-      <header className="border-b border-slate-900 bg-slate-950/60 backdrop-blur sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+    <div className="min-h-screen bg-bg text-ink">
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur">
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 text-white p-2 rounded-lg shadow-lg shadow-indigo-600/30">
+            <div className="grid place-items-center w-9 h-9 rounded-md bg-invert text-oninvert">
               <Shield className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono tracking-wider bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-semibold uppercase">
-                  Università della Calabria
-                </span>
-                <span className="text-[10px] font-mono text-indigo-400 font-bold uppercase">
-                  SDCC 25/26
-                </span>
+            <div className="leading-tight">
+              <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-faint">
+                <span>Università della Calabria</span>
+                <span aria-hidden>·</span>
+                <span>SDCC 25/26</span>
               </div>
-              <h1 className="text-lg font-extrabold tracking-tight text-white">
-                Social Privacy Detector
-              </h1>
+              <h1 className="font-display text-[17px] font-bold tracking-tight">Social Privacy Detector</h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-xs font-mono">
-            <div className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded flex items-center gap-2">
-              <Server className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Nginx Proxy Integration</span>
-            </div>
+          <div className="flex items-center gap-2.5">
+            <span className="hidden sm:flex items-center gap-1.5 text-[11px] font-mono text-muted border border-line rounded-full px-2.5 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-low" />
+              AWS · us-east-1
+            </span>
+            <button
+              type="button"
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+              aria-label={theme === "dark" ? "Passa al tema chiaro" : "Passa al tema scuro"}
+              className="grid place-items-center w-9 h-9 rounded-md border border-line text-muted hover:text-ink hover:bg-surface2 transition-colors"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
           </div>
         </div>
       </header>
 
-      {/* ==============================================================================
-      # MAIN BODY GRID
-      ============================================================================== */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="max-w-6xl mx-auto px-5 sm:px-8 py-10 sm:py-14">
+        {/* ── Hero: la tesi + la signature (redazione che si rivela) ─────────── */}
+        <section className="max-w-3xl mb-12">
+          <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-muted">
+            Analisi dell'esposizione pubblica
+          </span>
+          <h2 className="font-display text-3xl sm:text-[42px] leading-[1.08] font-bold tracking-tight mt-3">
+            Il tuo profilo pubblico
+            <br className="hidden sm:block" /> dice più di quanto pensi.
+          </h2>
+          <p className="text-muted text-sm sm:text-base leading-relaxed mt-4">
+            Da una biografia e pochi post, un estraneo può ricostruire chi sei, dove vivi e come contattarti.
+            Questo strumento individua i dati personali <span className="text-ink">esposti</span>, stima i vettori
+            di ingegneria sociale e assegna un punteggio di rischio.
+          </p>
 
-        {/* Intro Context Banner */}
-        <div className="bg-gradient-to-br from-indigo-950/40 via-slate-950 to-slate-950 border border-slate-900/80 rounded-xl p-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/5 rounded-full blur-3xl -z-10"></div>
-
-          <div className="max-w-4xl space-y-3">
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-mono font-medium">
-              SISTEMI DISTRIBUITI E CLOUD COMPUTING • PROGETTO D'ESAME
-            </div>
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-              Analisi dell'Esposizione Pubblica di Dati Personali sui Social Network
-            </h2>
-            <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">
-              Questa applicazione a microservizi rileva le informazioni personali esposte pubblicamente
-              (PII) e stima eventuali vettori di attacco di ingegneria sociale.
-              In produzione, la logica comunica direttamente con <strong>Amazon Web Services (AWS)</strong> via SDK Boto3
-              (AWS Comprehend, Amazon Textract, Bedrock Runtime con LLM Claude e tabelle DynamoDB su EC2).
-            </p>
+          <div className="mt-6 inline-flex items-center gap-3 font-mono text-sm border border-line rounded-lg bg-surface px-4 py-3">
+            <span className="text-faint">visibile pubblicamente</span>
+            <span className="text-faint" aria-hidden>→</span>
+            <span className="redact rounded-sm">
+              mario.rossi@email.it
+              <span className="redact-bar" aria-hidden />
+            </span>
           </div>
-        </div>
+        </section>
 
-        {/* Dashboard Panels */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-
-          {/* ============================== LEFT SIDE: CONTROL PANEL & FORM ============================== */}
+          {/* ── Colonna sinistra: input ─────────────────────────────────────── */}
           <div className="lg:col-span-5 space-y-6">
-
-            {/* Quick-Test Templates Selector */}
-            <div className="bg-slate-950 border border-slate-900 rounded-xl p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
-                  Seleziona Template di Test
-                </span>
-                <span className="text-[10px] text-slate-500 font-mono">Unical Diagnostic</span>
+            <form onSubmit={handleAnalyze} className="rounded-xl border border-line bg-surface p-6 space-y-5">
+              <div className="space-y-2">
+                <label htmlFor="social-url" className="block text-sm font-medium">
+                  Profilo social <span className="text-faint font-normal">(obbligatorio)</span>
+                </label>
+                <div className="relative">
+                  <Search className="w-4 h-4 text-faint absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    id="social-url"
+                    type="url"
+                    required
+                    value={socialUrl}
+                    onChange={(e) => {
+                      setSocialUrl(e.target.value);
+                      setActiveTemplate(null);
+                    }}
+                    placeholder="https://instagram.com/nome.utente"
+                    className="w-full rounded-lg border border-line bg-bg py-2.5 pl-9 pr-3 text-sm font-mono placeholder:text-faint focus:outline-none focus:border-ink transition-colors"
+                  />
+                </div>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Usa un profilo preimpostato per popolare all'istante il form ed esaminare le diverse risposte del Mock AWS Comprehend/Bedrock.
-              </p>
 
-              <div className="space-y-1.5 pt-1">
-                {DEMO_PROFILES.map((profile, idx) => (
+              <div className="space-y-2">
+                <label htmlFor="scraped-content" className="block text-sm font-medium">
+                  Biografia o testo dei post <span className="text-faint font-normal">(facoltativo)</span>
+                </label>
+                <textarea
+                  id="scraped-content"
+                  rows={6}
+                  value={scrapedContent}
+                  onChange={(e) => {
+                    setScrapedContent(e.target.value);
+                    setActiveTemplate(null);
+                  }}
+                  placeholder="Se lo lasci vuoto, il testo pubblico viene recuperato automaticamente dal profilo indicato."
+                  className="w-full rounded-lg border border-line bg-bg p-3 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus:border-ink transition-colors resize-y"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  disabled={isLoading}
+                  className="w-1/3 rounded-lg border border-line py-2.5 text-sm font-medium text-muted hover:text-ink hover:bg-surface2 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Pulisci
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-2/3 rounded-lg bg-invert text-oninvert py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Analisi in corso…
+                    </>
+                  ) : (
+                    <>
+                      Analizza profilo
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+
+            {/* Profili di esempio */}
+            <div className="rounded-xl border border-line bg-surface p-6">
+              <span className="block text-[11px] font-mono uppercase tracking-widest text-muted mb-3">
+                Profili di esempio
+              </span>
+              <div className="space-y-1.5">
+                {DEMO_PROFILES.map((p, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => applyTemplate(idx)}
-                    className={`w-full text-left p-2.5 rounded text-xs font-mono transition-all border ${activeTemplate === idx
-                        ? "bg-indigo-950/50 border-indigo-500 text-indigo-300"
-                        : "bg-slate-900/50 border-slate-800 text-slate-300 hover:bg-slate-900"
-                      }`}
+                    className={`w-full text-left rounded-lg px-3 py-2.5 text-sm border transition-colors flex items-center justify-between gap-2 ${
+                      activeTemplate === idx
+                        ? "border-ink bg-surface2"
+                        : "border-line hover:bg-surface2"
+                    }`}
                   >
-                    <div className="flex justify-between items-center font-bold">
-                      <span>{profile.label}</span>
-                      <ArrowRight className="w-3.5 h-3.5 opacity-60" />
-                    </div>
+                    <span>{p.label}</span>
+                    <ArrowRight className="w-4 h-4 text-faint shrink-0" />
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Analysis Request Form */}
-            <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-6 space-y-5">
-              <div className="flex items-center gap-2.5 pb-3 border-b border-slate-900">
-                <Cpu className="w-5 h-5 text-indigo-400" />
-                <h3 className="font-bold text-sm uppercase tracking-wider font-mono">Configura Scansione</h3>
-              </div>
-
-              <form onSubmit={handleAnalyze} className="space-y-5">
-
-                {/* 1. social_url field (mandatory) */}
-                <div className="space-y-1.5">
-                  <label htmlFor="social-url" className="text-xs font-bold text-slate-300 font-mono flex justify-between">
-                    <span>SOCIAL URL (Obbligatorio)</span>
-                    <span className="text-indigo-400 text-[10px]">*</span>
-                  </label>
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                    <input
-                      id="social-url"
-                      type="url"
-                      required
-                      value={socialUrl}
-                      onChange={(e) => {
-                        setSocialUrl(e.target.value);
-                        setActiveTemplate(null);
-                      }}
-                      placeholder="https://instagram.com/filippo_abbeduto_27"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2.5 pl-10 pr-4 text-xs font-mono focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                {/* 2. scraped_content field (optional) */}
-                <div className="space-y-1.5">
-                  <label htmlFor="scraped-content" className="text-xs font-bold text-slate-300 font-mono flex justify-between">
-                    <span>BIO / CONTENUTO DEI POST (Opzionale)</span>
-                    <span className="text-[10px] text-slate-550 font-normal">Regex Processor fallback</span>
-                  </label>
-                  <textarea
-                    id="scraped-content"
-                    rows={6}
-                    value={scrapedContent}
-                    onChange={(e) => {
-                      setScrapedContent(e.target.value);
-                      setActiveTemplate(null);
-                    }}
-                    placeholder="Se non inserito, il backend simulerà l'output di un scraper automatico (es. Apify)..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600 transition-colors resize-y leading-relaxed"
-                  ></textarea>
-                </div>
-
-                {/* Form Buttons */}
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={handleClear}
-                    disabled={isLoading}
-                    className="w-1/3 bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-white border border-slate-800 rounded-lg py-2.5 text-xs font-bold font-mono transition-colors flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Clear
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-2/3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white rounded-lg py-2.5 text-xs font-bold font-mono transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 active:scale-95 disabled:opacity-50"
-                  >
-                    {isLoading ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                        Analisi in corso...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        Analizza Profilo
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            {/* Microservices Connection Info */}
-            <div className="bg-slate-950 border border-slate-900 rounded-xl p-5 space-y-2.5 text-xs">
-              <span className="font-mono text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
-                Docker Network Context
+            {/* Motore (crediti onesti, non dettagli interni) */}
+            <div className="rounded-xl border border-line bg-surface p-6 text-sm">
+              <span className="block text-[11px] font-mono uppercase tracking-widest text-muted mb-3">
+                Motore di analisi
               </span>
-              <div className="space-y-1.5 text-slate-400 font-mono text-[11px]">
-                <div className="flex justify-between">
-                  <span>Routing Entrypoint:</span>
-                  <span className="text-white">Nginx (Port 80)</span>
+              <dl className="space-y-2 text-muted">
+                <div className="flex justify-between gap-4">
+                  <dt>Rilevamento dati personali</dt>
+                  <dd className="text-ink font-mono text-xs">Amazon Comprehend</dd>
                 </div>
-                <div className="flex justify-between">
-                  <span>Frontend Service:</span>
-                  <span className="text-white">React SPA (Port 3000)</span>
+                <div className="flex justify-between gap-4">
+                  <dt>Report minacce</dt>
+                  <dd className="text-ink font-mono text-xs">Amazon Bedrock · Claude</dd>
                 </div>
-                <div className="flex justify-between">
-                  <span>Backend API Service:</span>
-                  <span className="text-white">FastAPI (Port 8000)</span>
+                <div className="flex justify-between gap-4">
+                  <dt>Persistenza</dt>
+                  <dd className="text-ink font-mono text-xs">DynamoDB · S3</dd>
                 </div>
-                <div className="flex justify-between">
-                  <span>Mock AWS Engine:</span>
-                  <span className="text-emerald-400 font-bold">Enabled (Offline)</span>
-                </div>
-              </div>
+              </dl>
             </div>
-
           </div>
 
-          {/* ============================== RIGHT SIDE: LIVE ANALYSIS RESULTS ============================== */}
+          {/* ── Colonna destra: risultati ───────────────────────────────────── */}
           <div className="lg:col-span-7">
-
-            {/* Error alerts */}
             {error && (
-              <div className="bg-red-950/20 border-2 border-red-900/50 rounded-xl p-5 text-slate-100 flex gap-4 items-start animate-pulse mb-6">
-                <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
+              <div className="rounded-xl border border-high/40 bg-high/10 p-5 flex gap-3 items-start mb-6" role="alert">
+                <AlertTriangle className="w-5 h-5 text-high shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <h4 className="font-bold text-sm text-red-400 font-mono">Errore Comunione Microservizi</h4>
-                  <p className="text-xs text-red-200 leading-relaxed">
-                    {error}
-                  </p>
-                  <p className="text-[10px] text-slate-500 pt-2 font-mono">
-                    Verificare che i container siano attivi digidando: <code>docker compose ps</code> nel terminale locale.
-                  </p>
+                  <h3 className="text-sm font-semibold text-high">Analisi non riuscita</h3>
+                  <p className="text-sm text-muted leading-relaxed">{error}</p>
                 </div>
               </div>
             )}
 
-            {/* Async Job Status: PENDING / PROCESSING */}
             {isLoading && jobStatus && !result && (
-              <div className="bg-gradient-to-br from-indigo-950/30 via-slate-950 to-slate-950 border border-indigo-900/40 rounded-xl p-8 text-center space-y-5 mb-6">
-                <div className="relative w-16 h-16 mx-auto">
-                  <div className="absolute inset-0 rounded-full border-2 border-indigo-500/20"></div>
-                  <div className="absolute inset-0 rounded-full border-2 border-t-indigo-400 animate-spin"></div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <Cpu className="w-6 h-6 text-indigo-400" />
-                  </div>
+              <div className="rounded-xl border border-line bg-surface p-8 text-center mb-6">
+                <div className="relative w-14 h-14 mx-auto mb-5">
+                  <div className="absolute inset-0 rounded-full border-2 border-line" />
+                  <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-ink animate-spin" />
+                  <Cpu className="w-5 h-5 absolute inset-0 m-auto text-muted" />
                 </div>
-
-                <div className="space-y-2">
-                  <h4 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
-                    {jobStatus === "PENDING" ? "Analisi in Coda" : "Elaborazione in Corso"}
-                  </h4>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-                    {jobStatus === "PENDING"
-                      ? "Il job è stato accodato e verrà elaborato a breve dal worker cloud..."
-                      : "Il worker sta analizzando il profilo: scraping, PII detection, risk scoring..."
-                    }
-                  </p>
-                </div>
-
-                {/* Status pills */}
-                <div className="flex items-center justify-center gap-2 pt-2">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${
-                    jobStatus === "PENDING"
-                      ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                      : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
-                      jobStatus === "PENDING" ? "bg-amber-400" : "bg-emerald-400"
-                    }`}></span>
-                    {jobStatus}
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-600">
-                    Polling ogni 3s...
-                  </span>
-                </div>
-
-                {/* Pipeline steps visualization */}
-                <div className="flex items-center justify-center gap-1 pt-3">
-                  {["Scraping", "PII Detection", "Risk Score", "Report"].map((step, idx) => (
-                    <div key={step} className="flex items-center gap-1">
-                      <span className={`text-[9px] font-mono px-2 py-0.5 rounded border ${
-                        jobStatus === "PROCESSING" && idx <= 1
-                          ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/30"
-                          : "bg-slate-900 text-slate-600 border-slate-800"
-                      }`}>
+                <h3 className="font-display font-semibold">
+                  {jobStatus === "PENDING" ? "Richiesta in coda" : "Elaborazione in corso"}
+                </h3>
+                <p className="text-sm text-muted max-w-sm mx-auto mt-1.5 leading-relaxed">
+                  {jobStatus === "PENDING"
+                    ? "La richiesta è stata accodata e verrà elaborata a breve."
+                    : "Recupero del testo pubblico, rilevamento dei dati personali e calcolo del rischio."}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-1.5 mt-5">
+                  {["Recupero testo", "Dati personali", "Punteggio", "Report"].map((step, idx) => (
+                    <React.Fragment key={step}>
+                      <span
+                        className={`text-[11px] font-mono rounded px-2 py-1 border ${
+                          jobStatus === "PROCESSING" && idx <= 1
+                            ? "border-ink text-ink"
+                            : "border-line text-faint"
+                        }`}
+                      >
                         {step}
                       </span>
-                      {idx < 3 && <ArrowRight className="w-2.5 h-2.5 text-slate-700" />}
-                    </div>
+                      {idx < 3 && <ChevronRight className="w-3.5 h-3.5 text-faint" />}
+                    </React.Fragment>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Results Output */}
             {result && result.status === "COMPLETED" && result.risk_assessment ? (
-              <div className="space-y-6">
-
-                {/* 1. Global Risk Summary Card */}
+              <div key={result.analysis_id} className="space-y-6">
                 {(() => {
-                  const styles = getRiskStyles(result.risk_assessment.risk_level);
+                  const r = riskInfo(result.risk_assessment!.risk_level);
+                  const score = result.risk_assessment!.score;
                   return (
-                    <div className={`border rounded-xl p-6 transition-all ${styles.bg}`}>
-
-                      {/* Top Risk Header Row */}
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-slate-900">
-                        <div className="space-y-0.5">
-                          <span className="text-[10px] font-mono tracking-widest text-slate-500 uppercase block">
-                            AWS Risk Assessment Report
+                    <div className={`rise rounded-xl border p-6 ${RISK_TINT[r.key]}`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <span className="text-[11px] font-mono uppercase tracking-widest text-muted">
+                            Verdetto
                           </span>
-                          <h3 className="font-mono text-sm font-bold text-white flex items-center gap-2">
-                            Report ID: <span className="text-slate-400 text-xs">{result.analysis_id.substring(0, 8)}...</span>
-                          </h3>
+                          <div className="flex items-baseline gap-3 mt-1">
+                            <span className={`font-display text-3xl font-bold ${RISK_TEXT[r.key]}`}>
+                              Rischio {r.label.toLowerCase()}
+                            </span>
+                          </div>
                         </div>
-
-                        <span className={`px-3 py-1 bg-slate-950 border rounded-md text-[10px] font-mono font-bold tracking-wider ${styles.badge}`}>
-                          {styles.label}
-                        </span>
+                        <div className="text-right shrink-0">
+                          <div className="font-mono">
+                            <span className={`text-3xl font-bold ${RISK_TEXT[r.key]}`}>{score}</span>
+                            <span className="text-sm text-faint">/100</span>
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Level, score bar and justification explanation */}
-                      <div className="pt-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2 text-2xl font-black font-mono tracking-tight text-white uppercase">
-                            <span className={`w-3 h-3 rounded-full ${styles.indicator} animate-ping shrink-0`}></span>
-                            <span className={styles.accentText}>{result.risk_assessment.risk_level} LEVEL</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Activity className={`w-4 h-4 ${styles.accentText}`} />
-                            <span className={`text-2xl font-black font-mono ${styles.accentText}`}>
-                              {result.risk_assessment.score}
-                            </span>
-                            <span className="text-xs font-mono text-slate-500">/100</span>
-                          </div>
+                      {/* Barra semantica del punteggio con tacche a 35 e 70 */}
+                      <div className="mt-5">
+                        <div className="relative h-2 rounded-full bg-surface2 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${RISK_BG[r.key]} transition-[width] duration-700 ease-out`}
+                            style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
+                          />
                         </div>
-
-                        {/* Visual Score Bar */}
-                        <div className="space-y-1.5">
-                          <div className="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all duration-1000 ease-out ${
-                                result.risk_assessment.score >= 70
-                                  ? "bg-gradient-to-r from-red-600 to-red-400"
-                                  : result.risk_assessment.score >= 35
-                                    ? "bg-gradient-to-r from-amber-600 to-amber-400"
-                                    : "bg-gradient-to-r from-emerald-600 to-emerald-400"
-                              }`}
-                              style={{ width: `${result.risk_assessment.score}%` }}
-                            ></div>
-                          </div>
-                          <div className="flex justify-between text-[9px] font-mono text-slate-600">
-                            <span>0 — Sicuro</span>
-                            <span>35 — Medio</span>
-                            <span>70 — Alto</span>
-                            <span>100</span>
-                          </div>
+                        <div className="relative mt-1.5 h-4 text-[10px] font-mono text-faint">
+                          <span className="absolute left-0">0</span>
+                          <span className="absolute -translate-x-1/2" style={{ left: "35%" }}>35</span>
+                          <span className="absolute -translate-x-1/2" style={{ left: "70%" }}>70</span>
+                          <span className="absolute right-0">100</span>
                         </div>
-
-                        <p className="text-slate-300 text-xs leading-relaxed font-sans">
-                          {result.risk_assessment.explanation}
-                        </p>
-
-                        {/* Motivations Breakdown */}
-                        {result.risk_assessment.motivations && result.risk_assessment.motivations.length > 0 && (
-                          <div className="mt-2 pt-3 border-t border-slate-900/60 space-y-2">
-                            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 block">
-                              Breakdown Score — Contributi al Punteggio
-                            </span>
-                            <div className="space-y-1">
-                              {result.risk_assessment.motivations.map((motivation, idx) => (
-                                <div
-                                  key={idx}
-                                  className="flex items-start gap-2 text-[11px] font-mono text-slate-400 bg-slate-950/50 rounded px-2.5 py-1.5 border border-slate-900/50"
-                                >
-                                  <ChevronRight className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
-                                  <span>{motivation}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </div>
 
-                      {/* Social Target analyzed */}
-                      <div className="mt-4 pt-3 border-t border-slate-900/60 flex flex-wrap gap-x-4 gap-y-2 text-[10px] font-mono text-slate-500">
-                        <span>Target Social: <strong className="text-indigo-400">{result.social_url}</strong></span>
-                        <span>Stato Richiesta: <strong className="text-emerald-400">{result.status}</strong></span>
+                      <p className="text-sm text-muted leading-relaxed mt-4">
+                        {result.risk_assessment!.explanation}
+                      </p>
+
+                      {result.risk_assessment!.motivations?.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-line">
+                          <span className="block text-[11px] font-mono uppercase tracking-widest text-muted mb-2">
+                            Come si compone il punteggio
+                          </span>
+                          <ul className="space-y-1.5">
+                            {result.risk_assessment!.motivations.map((m, idx) => (
+                              <li key={idx} className="flex items-start gap-2 text-[13px] font-mono text-muted">
+                                <ChevronRight className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${RISK_TEXT[r.key]}`} />
+                                <span>{m}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <div className="mt-4 pt-4 border-t border-line text-[11px] font-mono text-faint break-all">
+                        Profilo analizzato: <span className="text-muted">{result.social_url}</span>
                       </div>
                     </div>
                   );
                 })()}
 
-                {/* 2. Detected PII List (Simulating Comprehend or Textract matches via Python) */}
-                <div className="bg-slate-900/20 border border-slate-800 rounded-xl p-5 space-y-4">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <Terminal className="w-4 h-4 text-indigo-400" />
-                      <h4 className="text-xs font-bold uppercase tracking-wider font-mono">Dati Sensibili Rilevati (PII)</h4>
-                    </div>
-                    <span className="text-[10px] font-mono bg-slate-950 text-indigo-400 border border-slate-800 px-2 py-0.5 rounded">
-                      AWS Comprehend Mock
-                    </span>
-                  </div>
+                {/* Dati personali rilevati — con la signature "redazione rivelata" */}
+                <div className="rise rounded-xl border border-line bg-surface p-6" style={{ animationDelay: "0.06s" }}>
+                  <h3 className="font-display font-semibold mb-1">Dati personali rilevati</h3>
+                  <p className="text-sm text-muted mb-4">
+                    Ciò che è pubblicamente estraibile dal profilo. Ogni valore era nascosto: viene rivelato per
+                    mostrarne l'esposizione.
+                  </p>
 
                   {(result.detected_pii || []).length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs font-mono">
-                        <thead>
-                          <tr className="border-b border-slate-900 text-slate-500">
-                            <th className="py-2 font-medium">Tipologia PII</th>
-                            <th className="py-2 font-medium">Testo Individuato</th>
-                            <th className="py-2 text-right font-medium">Confidence Score</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-900/60">
-                          {(result.detected_pii || []).map((entity, idx) => (
-                            <tr key={idx} className="hover:bg-slate-900/30">
-                              <td className="py-2.5 flex items-center gap-2">
-                                {entity.type === "EMAIL" && <Mail className="w-3.5 h-3.5 text-indigo-400" />}
-                                {entity.type === "PHONE_NUMBER" && <Phone className="w-3.5 h-3.5 text-indigo-400" />}
-                                {entity.type === "LOCATION" && <MapPin className="w-3.5 h-3.5 text-indigo-400" />}
-                                <span className="font-bold text-slate-200">{entity.type}</span>
-                              </td>
-                              <td className="py-2.5 text-slate-300 break-all select-all">
-                                {entity.text}
-                              </td>
-                              <td className="py-2.5 text-right font-bold text-emerald-400">
-                                {(entity.score * 100).toFixed(0)}%
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <ul className="divide-y divide-line">
+                      {(result.detected_pii || []).map((e, idx) => {
+                        const meta = piiMeta(e.type);
+                        const Icon = meta.Icon;
+                        return (
+                          <li key={idx} className="flex items-center gap-3 py-2.5">
+                            <Icon className="w-4 h-4 text-muted shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] font-mono uppercase tracking-wider text-faint">
+                                {meta.label}
+                              </div>
+                              <div className="text-sm font-mono truncate">
+                                <span className="redact rounded-sm">
+                                  {e.text}
+                                  <span
+                                    className="redact-bar"
+                                    style={{ animationDelay: `${0.15 + idx * 0.08}s` }}
+                                    aria-hidden
+                                  />
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-mono text-muted shrink-0" title="Confidenza del rilevamento">
+                              {(e.score * 100).toFixed(0)}%
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   ) : (
-                    <div className="p-6 bg-slate-950 border border-slate-900/80 rounded-lg text-center space-y-2">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                      <h5 className="text-xs font-bold font-mono">Nessun dato personale individuato</h5>
-                      <p className="text-[11px] text-slate-500">
-                        L'algoritmo non ha isolato email o recapiti telefonici leggibili nel testo fornito.
+                    <div className="text-center py-8">
+                      <ShieldCheck className="w-8 h-8 text-low mx-auto mb-2" />
+                      <p className="text-sm font-medium">Nessun dato personale leggibile</p>
+                      <p className="text-sm text-muted mt-1">
+                        Il testo analizzato non espone contatti o identificativi diretti.
                       </p>
                     </div>
                   )}
                 </div>
 
-                {/* 3. Threat Assessment Report Box (Simulating Claude-v2 on Bedrock APIs) */}
-                <div className="bg-slate-900/20 border border-slate-800 rounded-xl p-5 space-y-4">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-indigo-400" />
-                      <h4 className="text-xs font-bold uppercase tracking-wider font-mono">Rapporto Minacce Ingegneria Sociale</h4>
-                    </div>
-                    <span className="text-[10px] font-mono bg-slate-950 text-indigo-400 border border-slate-800 px-2 py-0.5 rounded">
-                      Generative AI Claude
-                    </span>
-                  </div>
-
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Come richiesto per l'esame, l'AI esamina i pattern esposti e genera una simulazione dello spoofing basato sul contesto.
-                  </p>
-
-                  <div className="space-y-3.5">
-                    {(result.social_engineering_report || []).map((threat, idx) => {
-                      const isHigh = threat.severity.toUpperCase() === "HIGH";
-                      const isMedium = threat.severity.toUpperCase() === "MEDIUM";
-                      return (
-                        <div
-                          key={idx}
-                          className={`rounded-lg p-4 border ${isHigh
-                              ? "bg-red-950/10 border-red-950 text-red-200"
-                              : isMedium
-                                ? "bg-amber-955/10 border-amber-950 text-amber-200"
-                                : "bg-slate-950 border-slate-900 text-slate-300"
-                            }`}
-                        >
-                          <div className="flex justify-between items-center mb-1.5 font-mono">
-                            <span className="text-xs font-bold tracking-tight text-white flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${isHigh ? "bg-red-500" : isMedium ? "bg-amber-500" : "bg-slate-500"}`}></span>
-                              {threat.threat_vector}
-                            </span>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase ${isHigh
-                                ? "bg-red-500/10 text-red-400 border-red-500/30"
-                                : isMedium
-                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                                  : "bg-slate-900 border-slate-800 text-slate-400"
-                              }`}>
-                              Gravità: {threat.severity}
-                            </span>
+                {/* Vettori di ingegneria sociale */}
+                {(result.social_engineering_report || []).length > 0 && (
+                  <div className="rise rounded-xl border border-line bg-surface p-6" style={{ animationDelay: "0.12s" }}>
+                    <h3 className="font-display font-semibold mb-1">Vettori di ingegneria sociale</h3>
+                    <p className="text-sm text-muted mb-4">
+                      Come i dati esposti potrebbero essere sfruttati per un attacco mirato.
+                    </p>
+                    <div className="space-y-3">
+                      {(result.social_engineering_report || []).map((t, idx) => {
+                        const r = riskInfo(t.severity);
+                        return (
+                          <div key={idx} className={`rounded-lg border p-4 ${RISK_TINT[r.key]}`}>
+                            <div className="flex items-center justify-between gap-3 mb-1.5">
+                              <span className="font-medium flex items-center gap-2">
+                                <span className={`w-1.5 h-1.5 rounded-full ${RISK_BG[r.key]}`} />
+                                {t.threat_vector}
+                              </span>
+                              <span className={`text-[10px] font-mono uppercase tracking-wider ${RISK_TEXT[r.key]}`}>
+                                {r.label}
+                              </span>
+                            </div>
+                            <p className="text-sm text-muted leading-relaxed">{t.explanation}</p>
                           </div>
-                          <p className="text-xs text-slate-300 leading-relaxed">
-                            {threat.explanation}
-                          </p>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-
+                )}
               </div>
             ) : (
-              // Empty result state / instructions
-              <div className="bg-slate-900/10 border border-slate-850 rounded-xl p-8 text-center space-y-4">
-                <div className="w-12 h-12 rounded-full bg-slate-900/90 border border-slate-800 flex items-center justify-center text-slate-500 mx-auto">
-                  <Terminal className="w-6 h-6" />
-                </div>
-
-                <div className="space-y-1 max-w-sm mx-auto">
-                  <h4 className="text-xs font-bold uppercase tracking-wider font-mono text-slate-300">
-                    Nessuna scansione avviata
-                  </h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Compila l'indirizzo social e il testo del profilo nel pannello di sinistra, oppure usa un template diagnostico ed esegui la scansione.
+              !isLoading &&
+              !error && (
+                <div className="rounded-xl border border-line bg-surface p-10 text-center">
+                  <div className="grid place-items-center w-12 h-12 rounded-full border border-line mx-auto mb-4 text-muted">
+                    <Search className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-display font-semibold">Nessuna analisi ancora</h3>
+                  <p className="text-sm text-muted max-w-sm mx-auto mt-1.5 leading-relaxed">
+                    Inserisci un profilo a sinistra — o scegli un profilo di esempio — e avvia l'analisi per vedere
+                    qui il verdetto, i dati esposti e i possibili attacchi.
                   </p>
                 </div>
-
-                {/* Checklist to prompt correct project requirements for SDCC Oral Exam */}
-                <div className="max-w-md mx-auto pt-4 border-t border-slate-900/80 text-left space-y-2 mt-4 text-[11px] text-slate-400 font-mono">
-                  <span className="font-bold text-slate-300 block uppercase text-[10px] tracking-wider">
-                    Checklist Requisiti d'Esame:
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                    <span>Nginx porta 80 che rincanalizza sia React sia FastAPI</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                    <span>Integrazione OpenAPI Swagger via /api/docs</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                    <span>Analisi PII mockata asincrona via Python regex</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                    <span>Report sui rischi di ingegneria sociale preconfigurato</span>
-                  </div>
-                </div>
-              </div>
+              )
             )}
-
           </div>
         </div>
-
       </main>
 
-      {/* ==============================================================================
-      # BOTTOM FOOTER INFO PART
-      ============================================================================== */}
-      <footer className="border-t border-slate-900 bg-slate-950 text-slate-500 py-8 mt-12 text-xs font-mono">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-center md:text-left">
-            Progetto per l'esame di <strong className="text-slate-300">Sistemi Distribuiti e Cloud Computing</strong>.
+      <footer className="border-t border-line mt-16">
+        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-6 flex flex-col sm:flex-row justify-between items-center gap-2 text-[13px] text-muted">
+          <p>
+            Sistemi Distribuiti e Cloud Computing — Università della Calabria
           </p>
-          <div className="flex items-center gap-4 text-slate-400">
-            <span>Matricola: <strong>276572</strong></span>
-            <span>Studente: <strong>Filippo Abbeduto</strong></span>
-          </div>
+          <p className="font-mono text-xs">
+            Filippo Abbeduto · mat. 276572
+          </p>
         </div>
       </footer>
-
     </div>
   );
 }
