@@ -1,7 +1,8 @@
 /* ==============================================================================
    SOCIAL PRIVACY DETECTOR — Design system
-   Estetica: dashboard SaaS calda e ariosa (riferimento fornito dall'utente).
-   Fondo crema, card bianche morbide arrotondate, accento terracotta.
+   Estetica: dashboard SaaS ariosa (riferimento fornito dall'utente).
+   Fondo NEUTRO — bianco (chiaro) / nero (scuro) — card morbide arrotondate,
+   accento terracotta.
    Il colore del RISCHIO (alto/medio/basso = rosso/ambra/verde) resta semantico.
    Temi chiaro (default) / scuro commutati via attributo data-theme su <html>.
    ============================================================================== */
@@ -40,40 +41,41 @@
   --color-low: var(--c-low);
 }
 
-/* Tema chiaro (default) — crema calda + terracotta, come la reference. */
+/* Tema chiaro (default) — fondo BIANCO neutro, card bianche separate da bordo +
+   ombra soffice. Accento terracotta e colori del rischio come uniche note calde. */
 :root,
 :root[data-theme="light"] {
-  --c-bg: #f4f0e9;
+  --c-bg: #ffffff;
   --c-surface: #ffffff;
-  --c-surface2: #f7f3ec;
-  --c-line: #e8e1d5;
-  --c-ink: #2b2823;
-  --c-muted: #8a8478;
-  --c-faint: #b4ad9f;
+  --c-surface2: #f4f4f5;
+  --c-line: #e8e8ea;
+  --c-ink: #18181b;
+  --c-muted: #71717a;
+  --c-faint: #a1a1aa;
   --c-accent: #be4a2f;
   --c-accentink: #ffffff;
   --c-high: #d2493a;
-  --c-med: #d99a34;
-  --c-low: #5b9a6b;
-  --shadow-soft: 0 1px 2px rgba(43, 40, 35, 0.04), 0 10px 30px -14px rgba(43, 40, 35, 0.18);
+  --c-med: #c98a2a;
+  --c-low: #4f9a6a;
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 30px -14px rgba(0, 0, 0, 0.14);
   color-scheme: light;
 }
 
-/* Tema scuro — charcoal caldo (non slate freddo), stesso accento terracotta. */
+/* Tema scuro — fondo NERO neutro, card grigio scuro neutre. Stesso accento. */
 :root[data-theme="dark"] {
-  --c-bg: #1b1916;
-  --c-surface: #24201c;
-  --c-surface2: #2b2722;
-  --c-line: #38332c;
-  --c-ink: #ece7dd;
-  --c-muted: #a09a8d;
-  --c-faint: #6f695d;
+  --c-bg: #0a0a0b;
+  --c-surface: #151517;
+  --c-surface2: #1c1c1f;
+  --c-line: #2a2a2e;
+  --c-ink: #f4f4f5;
+  --c-muted: #a1a1aa;
+  --c-faint: #6b6b73;
   --c-accent: #d1583c;
   --c-accentink: #ffffff;
   --c-high: #e2685a;
   --c-med: #e0aa52;
-  --c-low: #6fb083;
-  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px -14px rgba(0, 0, 0, 0.55);
+  --c-low: #63b17f;
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px -14px rgba(0, 0, 0, 0.7);
   color-scheme: dark;
 }
 
