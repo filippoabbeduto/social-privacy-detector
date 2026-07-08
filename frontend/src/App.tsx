@@ -4,12 +4,16 @@ import {
   Sun,
   Moon,
   Search,
+  ArrowRight,
   RefreshCw,
   Trash2,
-  ArrowRight,
   ChevronRight,
   AlertTriangle,
   ShieldCheck,
+  ShieldAlert,
+  Gauge,
+  Eye,
+  Target,
   Mail,
   Phone,
   MapPin,
@@ -108,7 +112,7 @@ const PII_META: Record<string, { label: string; Icon: React.ComponentType<{ clas
 };
 const piiMeta = (type: string) => PII_META[type] || { label: type, Icon: Tag };
 
-// Mappa il livello di rischio testuale ai token di colore semantici (gli unici saturi).
+// Livello di rischio → token colore semantico (gli unici saturi dell'interfaccia).
 type RiskKey = "high" | "med" | "low";
 const riskInfo = (level: string): { key: RiskKey; label: string } => {
   const l = (level || "").toUpperCase();
@@ -118,28 +122,104 @@ const riskInfo = (level: string): { key: RiskKey; label: string } => {
 };
 const RISK_TEXT: Record<RiskKey, string> = { high: "text-high", med: "text-med", low: "text-low" };
 const RISK_BG: Record<RiskKey, string> = { high: "bg-high", med: "bg-med", low: "bg-low" };
-const RISK_TINT: Record<RiskKey, string> = {
-  high: "bg-high/10 border-high/30",
-  med: "bg-med/10 border-med/30",
-  low: "bg-low/10 border-low/30",
+const RISK_PILL: Record<RiskKey, string> = {
+  high: "text-high border-high/40 bg-high/10",
+  med: "text-med border-med/40 bg-med/10",
+  low: "text-low border-low/40 bg-low/10",
 };
 
+// Pillola severità in stile "badge" (come la tabella della reference).
+function SeverityPill({ level }: { level: string }) {
+  const r = riskInfo(level);
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${RISK_PILL[r.key]}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${RISK_BG[r.key]}`} />
+      {r.label}
+    </span>
+  );
+}
+
+// Gauge radiale del punteggio (SVG, dati reali: score/100).
+function ScoreGauge({ score, riskKey }: { score: number; riskKey: RiskKey }) {
+  const R = 34;
+  const C = 2 * Math.PI * R;
+  const clamped = Math.min(100, Math.max(0, score));
+  const offset = C * (1 - clamped / 100);
+  return (
+    <div className="relative w-24 h-24 shrink-0">
+      <svg viewBox="0 0 80 80" className="w-24 h-24 -rotate-90">
+        <circle cx="40" cy="40" r={R} fill="none" stroke="var(--c-line)" strokeWidth="7" />
+        <circle
+          cx="40"
+          cy="40"
+          r={R}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray={C}
+          strokeDashoffset={offset}
+          className={`${RISK_TEXT[riskKey]} transition-[stroke-dashoffset] duration-700 ease-out`}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className={`font-display text-2xl font-extrabold leading-none ${RISK_TEXT[riskKey]}`}>{clamped}</span>
+        <span className="text-[10px] font-mono text-faint mt-0.5">/100</span>
+      </div>
+    </div>
+  );
+}
+
+// Card KPI (icona tinta + etichetta + valore grande), stile reference "KPI Summary".
+function StatCard({
+  Icon,
+  label,
+  value,
+  sub,
+  tone = "accent",
+}: {
+  Icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: "accent" | RiskKey;
+}) {
+  const tint =
+    tone === "accent"
+      ? "bg-accent/10 text-accent"
+      : tone === "high"
+      ? "bg-high/10 text-high"
+      : tone === "med"
+      ? "bg-med/10 text-med"
+      : "bg-low/10 text-low";
+  return (
+    <div className="rounded-2xl border border-line bg-surface shadow-soft p-4">
+      <div className={`grid place-items-center w-9 h-9 rounded-xl ${tint} mb-3`}>
+        <Icon className="w-4.5 h-4.5" />
+      </div>
+      <div className="text-[11px] uppercase tracking-wider text-muted font-semibold">{label}</div>
+      <div className="font-display text-2xl font-extrabold mt-0.5">{value}</div>
+      {sub && <div className="text-xs text-muted mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
 export default function App() {
-  // ─── Tema chiaro/scuro: legge quello già impostato dallo script inline in <head> ───
+  // ─── Tema: legge quello già impostato dallo script inline in <head> (default chiaro) ───
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const cur = typeof document !== "undefined" ? document.documentElement.getAttribute("data-theme") : null;
-    return cur === "light" ? "light" : "dark";
+    return cur === "dark" ? "dark" : "light";
   });
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     try {
       localStorage.setItem("spd-theme", theme);
     } catch {
-      /* localStorage non disponibile: ignora, il tema resta per la sessione */
+      /* localStorage non disponibile: il tema resta per la sessione */
     }
   }, [theme]);
 
-  // ─── Stato del form e dell'analisi ───
+  // ─── Stato form / analisi ───
   const [socialUrl, setSocialUrl] = useState("");
   const [scrapedContent, setScrapedContent] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -160,7 +240,6 @@ export default function App() {
     setError(null);
   };
 
-  // Polling dello stato del job ogni 3s finché COMPLETED o FAILED.
   const startPolling = (analysisId: string) => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
@@ -181,7 +260,7 @@ export default function App() {
           setIsLoading(false);
         }
       } catch (err) {
-        console.error("Polling error:", err); // errori di rete temporanei: non fermare il polling
+        console.error("Polling error:", err); // errori di rete temporanei: continua il polling
       }
     }, 3000);
   };
@@ -228,27 +307,29 @@ export default function App() {
     setIsLoading(false);
   };
 
+  const risk = result?.risk_assessment ? riskInfo(result.risk_assessment.risk_level) : null;
+  const piiList = result?.detected_pii || [];
+  const threats = result?.social_engineering_report || [];
+
   return (
     <div className="min-h-screen bg-bg text-ink">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur">
+      <header className="sticky top-0 z-50 border-b border-line bg-bg/85 backdrop-blur">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="grid place-items-center w-9 h-9 rounded-md bg-invert text-oninvert">
+            <div className="grid place-items-center w-9 h-9 rounded-xl bg-accent text-accentink shadow-soft">
               <Shield className="w-5 h-5" />
             </div>
             <div className="leading-tight">
-              <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-faint">
-                <span>Università della Calabria</span>
-                <span aria-hidden>·</span>
-                <span>SDCC 25/26</span>
+              <div className="text-[10px] font-mono uppercase tracking-widest text-faint">
+                Università della Calabria · SDCC 25/26
               </div>
               <h1 className="font-display text-[17px] font-bold tracking-tight">Social Privacy Detector</h1>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5">
-            <span className="hidden sm:flex items-center gap-1.5 text-[11px] font-mono text-muted border border-line rounded-full px-2.5 py-1">
+            <span className="hidden sm:flex items-center gap-1.5 text-xs text-muted border border-line rounded-full px-3 py-1.5 bg-surface">
               <span className="w-1.5 h-1.5 rounded-full bg-low" />
               AWS · us-east-1
             </span>
@@ -256,7 +337,7 @@ export default function App() {
               type="button"
               onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
               aria-label={theme === "dark" ? "Passa al tema chiaro" : "Passa al tema scuro"}
-              className="grid place-items-center w-9 h-9 rounded-md border border-line text-muted hover:text-ink hover:bg-surface2 transition-colors"
+              className="grid place-items-center w-9 h-9 rounded-xl border border-line bg-surface text-muted hover:text-ink transition-colors"
             >
               {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -264,42 +345,28 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-5 sm:px-8 py-10 sm:py-14">
-        {/* ── Hero: la tesi + la signature (redazione che si rivela) ─────────── */}
-        <section className="max-w-3xl mb-12">
-          <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-muted">
-            Analisi dell'esposizione pubblica
-          </span>
-          <h2 className="font-display text-3xl sm:text-[42px] leading-[1.08] font-bold tracking-tight mt-3">
-            Il tuo profilo pubblico
-            <br className="hidden sm:block" /> dice più di quanto pensi.
+      <main className="max-w-6xl mx-auto px-5 sm:px-8 py-8 sm:py-10">
+        {/* ── Intro ─────────────────────────────────────────────────────────── */}
+        <section className="mb-8 max-w-2xl">
+          <h2 className="font-display text-3xl sm:text-[38px] leading-[1.1] font-extrabold tracking-tight">
+            Quanto è esposto un profilo social?
           </h2>
-          <p className="text-muted text-sm sm:text-base leading-relaxed mt-4">
+          <p className="text-muted text-sm sm:text-base leading-relaxed mt-3">
             Da una biografia e pochi post, un estraneo può ricostruire chi sei, dove vivi e come contattarti.
-            Questo strumento individua i dati personali <span className="text-ink">esposti</span>, stima i vettori
-            di ingegneria sociale e assegna un punteggio di rischio.
+            Individua i dati personali esposti, i possibili attacchi e un punteggio di rischio.
           </p>
-
-          <div className="mt-6 inline-flex items-center gap-3 font-mono text-sm border border-line rounded-lg bg-surface px-4 py-3">
-            <span className="text-faint">visibile pubblicamente</span>
-            <span className="text-faint" aria-hidden>→</span>
-            <span className="redact rounded-sm">
-              mario.rossi@email.it
-              <span className="redact-bar" aria-hidden />
-            </span>
-          </div>
         </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* ── Colonna sinistra: input ─────────────────────────────────────── */}
-          <div className="lg:col-span-5 space-y-6">
-            <form onSubmit={handleAnalyze} className="rounded-xl border border-line bg-surface p-6 space-y-5">
+          <div className="lg:col-span-5 space-y-5">
+            <form onSubmit={handleAnalyze} className="rounded-2xl border border-line bg-surface shadow-soft p-6 space-y-5">
               <div className="space-y-2">
-                <label htmlFor="social-url" className="block text-sm font-medium">
+                <label htmlFor="social-url" className="block text-sm font-semibold">
                   Profilo social <span className="text-faint font-normal">(obbligatorio)</span>
                 </label>
                 <div className="relative">
-                  <Search className="w-4 h-4 text-faint absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-faint absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     id="social-url"
                     type="url"
@@ -310,13 +377,13 @@ export default function App() {
                       setActiveTemplate(null);
                     }}
                     placeholder="https://instagram.com/nome.utente"
-                    className="w-full rounded-lg border border-line bg-bg py-2.5 pl-9 pr-3 text-sm font-mono placeholder:text-faint focus:outline-none focus:border-ink transition-colors"
+                    className="w-full rounded-xl border border-line bg-bg py-2.5 pl-10 pr-3 text-sm font-mono placeholder:text-faint focus:outline-none focus:border-accent transition-colors"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="scraped-content" className="block text-sm font-medium">
+                <label htmlFor="scraped-content" className="block text-sm font-semibold">
                   Biografia o testo dei post <span className="text-faint font-normal">(facoltativo)</span>
                 </label>
                 <textarea
@@ -328,7 +395,7 @@ export default function App() {
                     setActiveTemplate(null);
                   }}
                   placeholder="Se lo lasci vuoto, il testo pubblico viene recuperato automaticamente dal profilo indicato."
-                  className="w-full rounded-lg border border-line bg-bg p-3 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus:border-ink transition-colors resize-y"
+                  className="w-full rounded-xl border border-line bg-bg p-3.5 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus:border-accent transition-colors resize-y"
                 />
               </div>
 
@@ -337,7 +404,7 @@ export default function App() {
                   type="button"
                   onClick={handleClear}
                   disabled={isLoading}
-                  className="w-1/3 rounded-lg border border-line py-2.5 text-sm font-medium text-muted hover:text-ink hover:bg-surface2 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="w-1/3 rounded-xl border border-line py-2.5 text-sm font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
                   <Trash2 className="w-4 h-4" />
                   Pulisci
@@ -345,7 +412,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-2/3 rounded-lg bg-invert text-oninvert py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="w-2/3 rounded-xl bg-accent text-accentink py-2.5 text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-60 shadow-soft"
                 >
                   {isLoading ? (
                     <>
@@ -363,32 +430,32 @@ export default function App() {
             </form>
 
             {/* Profili di esempio */}
-            <div className="rounded-xl border border-line bg-surface p-6">
-              <span className="block text-[11px] font-mono uppercase tracking-widest text-muted mb-3">
+            <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
+              <span className="block text-[11px] uppercase tracking-wider text-muted font-semibold mb-3">
                 Profili di esempio
               </span>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {DEMO_PROFILES.map((p, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => applyTemplate(idx)}
-                    className={`w-full text-left rounded-lg px-3 py-2.5 text-sm border transition-colors flex items-center justify-between gap-2 ${
-                      activeTemplate === idx
-                        ? "border-ink bg-surface2"
-                        : "border-line hover:bg-surface2"
+                    className={`w-full text-left rounded-xl px-3.5 py-2.5 text-sm border transition-colors flex items-center justify-between gap-2 ${
+                      activeTemplate === idx ? "border-accent bg-accent/5 text-ink" : "border-line hover:bg-surface2"
                     }`}
                   >
                     <span>{p.label}</span>
-                    <ArrowRight className="w-4 h-4 text-faint shrink-0" />
+                    <ArrowRight
+                      className={`w-4 h-4 shrink-0 ${activeTemplate === idx ? "text-accent" : "text-faint"}`}
+                    />
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Motore (crediti onesti, non dettagli interni) */}
-            <div className="rounded-xl border border-line bg-surface p-6 text-sm">
-              <span className="block text-[11px] font-mono uppercase tracking-widest text-muted mb-3">
+            {/* Motore (crediti onesti) */}
+            <div className="rounded-2xl border border-line bg-surface shadow-soft p-6 text-sm">
+              <span className="block text-[11px] uppercase tracking-wider text-muted font-semibold mb-3">
                 Motore di analisi
               </span>
               <dl className="space-y-2 text-muted">
@@ -409,25 +476,25 @@ export default function App() {
           </div>
 
           {/* ── Colonna destra: risultati ───────────────────────────────────── */}
-          <div className="lg:col-span-7">
+          <div className="lg:col-span-7 space-y-5">
             {error && (
-              <div className="rounded-xl border border-high/40 bg-high/10 p-5 flex gap-3 items-start mb-6" role="alert">
+              <div className="rounded-2xl border border-high/40 bg-high/10 shadow-soft p-5 flex gap-3 items-start" role="alert">
                 <AlertTriangle className="w-5 h-5 text-high shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <h3 className="text-sm font-semibold text-high">Analisi non riuscita</h3>
+                  <h3 className="text-sm font-bold text-high">Analisi non riuscita</h3>
                   <p className="text-sm text-muted leading-relaxed">{error}</p>
                 </div>
               </div>
             )}
 
             {isLoading && jobStatus && !result && (
-              <div className="rounded-xl border border-line bg-surface p-8 text-center mb-6">
+              <div className="rounded-2xl border border-line bg-surface shadow-soft p-10 text-center">
                 <div className="relative w-14 h-14 mx-auto mb-5">
                   <div className="absolute inset-0 rounded-full border-2 border-line" />
-                  <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-ink animate-spin" />
-                  <Cpu className="w-5 h-5 absolute inset-0 m-auto text-muted" />
+                  <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-accent animate-spin" />
+                  <Cpu className="w-5 h-5 absolute inset-0 m-auto text-accent" />
                 </div>
-                <h3 className="font-display font-semibold">
+                <h3 className="font-display font-bold">
                   {jobStatus === "PENDING" ? "Richiesta in coda" : "Elaborazione in corso"}
                 </h3>
                 <p className="text-sm text-muted max-w-sm mx-auto mt-1.5 leading-relaxed">
@@ -439,10 +506,8 @@ export default function App() {
                   {["Recupero testo", "Dati personali", "Punteggio", "Report"].map((step, idx) => (
                     <React.Fragment key={step}>
                       <span
-                        className={`text-[11px] font-mono rounded px-2 py-1 border ${
-                          jobStatus === "PROCESSING" && idx <= 1
-                            ? "border-ink text-ink"
-                            : "border-line text-faint"
+                        className={`text-[11px] font-medium rounded-lg px-2.5 py-1 border ${
+                          jobStatus === "PROCESSING" && idx <= 1 ? "border-accent text-accent" : "border-line text-faint"
                         }`}
                       >
                         {step}
@@ -454,107 +519,77 @@ export default function App() {
               </div>
             )}
 
-            {result && result.status === "COMPLETED" && result.risk_assessment ? (
-              <div key={result.analysis_id} className="space-y-6">
-                {(() => {
-                  const r = riskInfo(result.risk_assessment!.risk_level);
-                  const score = result.risk_assessment!.score;
-                  return (
-                    <div className={`rise rounded-xl border p-6 ${RISK_TINT[r.key]}`}>
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <span className="text-[11px] font-mono uppercase tracking-widest text-muted">
-                            Verdetto
-                          </span>
-                          <div className="flex items-baseline gap-3 mt-1">
-                            <span className={`font-display text-3xl font-bold ${RISK_TEXT[r.key]}`}>
-                              Rischio {r.label.toLowerCase()}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-mono">
-                            <span className={`text-3xl font-bold ${RISK_TEXT[r.key]}`}>{score}</span>
-                            <span className="text-sm text-faint">/100</span>
-                          </div>
-                        </div>
+            {result && result.status === "COMPLETED" && result.risk_assessment && risk ? (
+              <>
+                {/* KPI Summary (stile reference) */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <StatCard Icon={Gauge} tone={risk.key} label="Punteggio" value={`${result.risk_assessment.score}`} sub="/ 100" />
+                  <StatCard Icon={Eye} label="Dati esposti" value={piiList.length} sub={piiList.length === 1 ? "elemento" : "elementi"} />
+                  <StatCard Icon={Target} label="Vettori d'attacco" value={threats.length} sub={threats.length === 1 ? "scenario" : "scenari"} />
+                </div>
+
+                {/* Verdetto: gauge + spiegazione */}
+                <div className="rise rounded-2xl border border-line bg-surface shadow-soft p-6">
+                  <div className="flex items-center gap-5">
+                    <ScoreGauge score={result.risk_assessment.score} riskKey={risk.key} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <ShieldAlert className={`w-4 h-4 ${RISK_TEXT[risk.key]}`} />
+                        <span className="text-[11px] uppercase tracking-wider text-muted font-semibold">Verdetto</span>
                       </div>
-
-                      {/* Barra semantica del punteggio con tacche a 35 e 70 */}
-                      <div className="mt-5">
-                        <div className="relative h-2 rounded-full bg-surface2 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${RISK_BG[r.key]} transition-[width] duration-700 ease-out`}
-                            style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
-                          />
-                        </div>
-                        <div className="relative mt-1.5 h-4 text-[10px] font-mono text-faint">
-                          <span className="absolute left-0">0</span>
-                          <span className="absolute -translate-x-1/2" style={{ left: "35%" }}>35</span>
-                          <span className="absolute -translate-x-1/2" style={{ left: "70%" }}>70</span>
-                          <span className="absolute right-0">100</span>
-                        </div>
+                      <div className={`font-display text-2xl font-extrabold ${RISK_TEXT[risk.key]}`}>
+                        Rischio {risk.label.toLowerCase()}
                       </div>
-
-                      <p className="text-sm text-muted leading-relaxed mt-4">
-                        {result.risk_assessment!.explanation}
-                      </p>
-
-                      {result.risk_assessment!.motivations?.length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-line">
-                          <span className="block text-[11px] font-mono uppercase tracking-widest text-muted mb-2">
-                            Come si compone il punteggio
-                          </span>
-                          <ul className="space-y-1.5">
-                            {result.risk_assessment!.motivations.map((m, idx) => (
-                              <li key={idx} className="flex items-start gap-2 text-[13px] font-mono text-muted">
-                                <ChevronRight className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${RISK_TEXT[r.key]}`} />
-                                <span>{m}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      <div className="mt-4 pt-4 border-t border-line text-[11px] font-mono text-faint break-all">
-                        Profilo analizzato: <span className="text-muted">{result.social_url}</span>
-                      </div>
+                      <p className="text-sm text-muted leading-relaxed mt-1.5">{result.risk_assessment.explanation}</p>
                     </div>
-                  );
-                })()}
+                  </div>
 
-                {/* Dati personali rilevati — con la signature "redazione rivelata" */}
-                <div className="rise rounded-xl border border-line bg-surface p-6" style={{ animationDelay: "0.06s" }}>
-                  <h3 className="font-display font-semibold mb-1">Dati personali rilevati</h3>
-                  <p className="text-sm text-muted mb-4">
-                    Ciò che è pubblicamente estraibile dal profilo. Ogni valore era nascosto: viene rivelato per
-                    mostrarne l'esposizione.
-                  </p>
+                  {result.risk_assessment.motivations?.length > 0 && (
+                    <div className="mt-5 pt-5 border-t border-line">
+                      <span className="block text-[11px] uppercase tracking-wider text-muted font-semibold mb-2.5">
+                        Come si compone il punteggio
+                      </span>
+                      <ul className="space-y-1.5">
+                        {result.risk_assessment.motivations.map((m, idx) => (
+                          <li key={idx} className="flex items-start gap-2 text-[13px] text-muted">
+                            <ChevronRight className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${RISK_TEXT[risk.key]}`} />
+                            <span>{m}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
-                  {(result.detected_pii || []).length > 0 ? (
-                    <ul className="divide-y divide-line">
-                      {(result.detected_pii || []).map((e, idx) => {
+                  <div className="mt-5 pt-4 border-t border-line text-[11px] font-mono text-faint break-all">
+                    Profilo analizzato: <span className="text-muted">{result.social_url}</span>
+                  </div>
+                </div>
+
+                {/* Dati personali rilevati — tabella pulita in stile reference */}
+                <div className="rise rounded-2xl border border-line bg-surface shadow-soft p-6" style={{ animationDelay: "0.06s" }}>
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <h3 className="font-display font-bold">Dati personali rilevati</h3>
+                    <span className="text-xs text-muted">{piiList.length} totali</span>
+                  </div>
+
+                  {piiList.length > 0 ? (
+                    <ul className="divide-y divide-line -my-1">
+                      {piiList.map((e, idx) => {
                         const meta = piiMeta(e.type);
                         const Icon = meta.Icon;
                         return (
                           <li key={idx} className="flex items-center gap-3 py-2.5">
-                            <Icon className="w-4 h-4 text-muted shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[11px] font-mono uppercase tracking-wider text-faint">
-                                {meta.label}
-                              </div>
-                              <div className="text-sm font-mono truncate">
-                                <span className="redact rounded-sm">
-                                  {e.text}
-                                  <span
-                                    className="redact-bar"
-                                    style={{ animationDelay: `${0.15 + idx * 0.08}s` }}
-                                    aria-hidden
-                                  />
-                                </span>
-                              </div>
+                            <div className="grid place-items-center w-8 h-8 rounded-lg bg-surface2 text-muted shrink-0">
+                              <Icon className="w-4 h-4" />
                             </div>
-                            <span className="text-xs font-mono text-muted shrink-0" title="Confidenza del rilevamento">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] uppercase tracking-wider text-faint font-semibold">{meta.label}</div>
+                              <div className="text-sm font-mono truncate select-all">{e.text}</div>
+                            </div>
+                            <span
+                              className="text-xs font-mono text-muted shrink-0 tabular-nums"
+                              title="Confidenza del rilevamento"
+                            >
                               {(e.score * 100).toFixed(0)}%
                             </span>
                           </li>
@@ -564,54 +599,42 @@ export default function App() {
                   ) : (
                     <div className="text-center py-8">
                       <ShieldCheck className="w-8 h-8 text-low mx-auto mb-2" />
-                      <p className="text-sm font-medium">Nessun dato personale leggibile</p>
-                      <p className="text-sm text-muted mt-1">
-                        Il testo analizzato non espone contatti o identificativi diretti.
-                      </p>
+                      <p className="text-sm font-semibold">Nessun dato personale leggibile</p>
+                      <p className="text-sm text-muted mt-1">Il testo analizzato non espone contatti o identificativi diretti.</p>
                     </div>
                   )}
                 </div>
 
-                {/* Vettori di ingegneria sociale */}
-                {(result.social_engineering_report || []).length > 0 && (
-                  <div className="rise rounded-xl border border-line bg-surface p-6" style={{ animationDelay: "0.12s" }}>
-                    <h3 className="font-display font-semibold mb-1">Vettori di ingegneria sociale</h3>
-                    <p className="text-sm text-muted mb-4">
-                      Come i dati esposti potrebbero essere sfruttati per un attacco mirato.
-                    </p>
+                {/* Vettori d'attacco */}
+                {threats.length > 0 && (
+                  <div className="rise rounded-2xl border border-line bg-surface shadow-soft p-6" style={{ animationDelay: "0.12s" }}>
+                    <h3 className="font-display font-bold mb-1">Vettori di ingegneria sociale</h3>
+                    <p className="text-sm text-muted mb-4">Come i dati esposti potrebbero essere sfruttati per un attacco mirato.</p>
                     <div className="space-y-3">
-                      {(result.social_engineering_report || []).map((t, idx) => {
-                        const r = riskInfo(t.severity);
-                        return (
-                          <div key={idx} className={`rounded-lg border p-4 ${RISK_TINT[r.key]}`}>
-                            <div className="flex items-center justify-between gap-3 mb-1.5">
-                              <span className="font-medium flex items-center gap-2">
-                                <span className={`w-1.5 h-1.5 rounded-full ${RISK_BG[r.key]}`} />
-                                {t.threat_vector}
-                              </span>
-                              <span className={`text-[10px] font-mono uppercase tracking-wider ${RISK_TEXT[r.key]}`}>
-                                {r.label}
-                              </span>
-                            </div>
-                            <p className="text-sm text-muted leading-relaxed">{t.explanation}</p>
+                      {threats.map((t, idx) => (
+                        <div key={idx} className="rounded-xl border border-line bg-surface2 p-4">
+                          <div className="flex items-center justify-between gap-3 mb-1.5">
+                            <span className="font-semibold">{t.threat_vector}</span>
+                            <SeverityPill level={t.severity} />
                           </div>
-                        );
-                      })}
+                          <p className="text-sm text-muted leading-relaxed">{t.explanation}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
-              </div>
+              </>
             ) : (
               !isLoading &&
               !error && (
-                <div className="rounded-xl border border-line bg-surface p-10 text-center">
-                  <div className="grid place-items-center w-12 h-12 rounded-full border border-line mx-auto mb-4 text-muted">
+                <div className="rounded-2xl border border-line bg-surface shadow-soft p-10 text-center">
+                  <div className="grid place-items-center w-12 h-12 rounded-2xl bg-accent/10 text-accent mx-auto mb-4">
                     <Search className="w-5 h-5" />
                   </div>
-                  <h3 className="font-display font-semibold">Nessuna analisi ancora</h3>
+                  <h3 className="font-display font-bold">Nessuna analisi ancora</h3>
                   <p className="text-sm text-muted max-w-sm mx-auto mt-1.5 leading-relaxed">
-                    Inserisci un profilo a sinistra — o scegli un profilo di esempio — e avvia l'analisi per vedere
-                    qui il verdetto, i dati esposti e i possibili attacchi.
+                    Inserisci un profilo a sinistra — o scegli un profilo di esempio — e avvia l'analisi per vedere qui il
+                    verdetto, i dati esposti e i possibili attacchi.
                   </p>
                 </div>
               )
@@ -620,14 +643,10 @@ export default function App() {
         </div>
       </main>
 
-      <footer className="border-t border-line mt-16">
+      <footer className="border-t border-line mt-12">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-6 flex flex-col sm:flex-row justify-between items-center gap-2 text-[13px] text-muted">
-          <p>
-            Sistemi Distribuiti e Cloud Computing — Università della Calabria
-          </p>
-          <p className="font-mono text-xs">
-            Filippo Abbeduto · mat. 276572
-          </p>
+          <p>Sistemi Distribuiti e Cloud Computing — Università della Calabria</p>
+          <p className="font-mono text-xs">Filippo Abbeduto · mat. 276572</p>
         </div>
       </footer>
     </div>
