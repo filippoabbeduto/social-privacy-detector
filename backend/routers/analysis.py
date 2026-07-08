@@ -22,7 +22,7 @@ from typing import Optional
 # NOTA: rimosso "import json" — era usato solo dal vecchio percorso SQS (ora
 # eliminato per coerenza architetturale, vedi _enqueue_job).
 
-from fastapi import APIRouter, status, HTTPException
+from fastapi import APIRouter, status, HTTPException, UploadFile, File
 
 from models.schemas import (
     ProfileAnalysisRequest,
@@ -218,6 +218,61 @@ def analyze_profile(payload: ProfileAnalysisRequest):
         analysis_id=analysis_id,
         status="PENDING",
         message="Analisi accodata. Usa GET /api/analysis/{analysis_id} per controllare lo stato.",
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /api/analyze-image - OCR (Amazon Textract) + analisi PII su un'immagine
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Textract detect_document_text (sincrono) accetta fino a ~10 MB: teniamo un
+# margine e blocchiamo prima di caricare tutto in memoria.
+MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+
+
+@router.post("/analyze-image", response_model=AnalysisJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def analyze_image(file: UploadFile = File(...)):
+    """
+    Analizza un'IMMAGINE (screenshot, foto di un documento/cartello, ...) invece
+    di un profilo testuale. Amazon Textract estrae il testo visibile (OCR), poi
+    si riusa la STESSA pipeline asincrona (PII detection + rischio + report). Copre
+    le PII esposte dentro le immagini, non solo nella biografia testuale.
+    """
+    # Accetta solo immagini.
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Carica un file immagine (PNG, JPEG, ...).",
+        )
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File immagine vuoto.")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Immagine troppo grande (max 8 MB).",
+        )
+
+    # OCR: Amazon Textract estrae il testo visibile nell'immagine.
+    extracted_text = pii_service.extract_text_from_image(image_bytes)
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Nessun testo leggibile rilevato nell'immagine.",
+        )
+
+    # Riusa la pipeline asincrona passando il testo OCR come 'scraped_content'.
+    analysis_id = str(uuid.uuid4())
+    source = f"immagine: {file.filename}" if file.filename else "immagine caricata"
+    storage_service.create_job(analysis_id=analysis_id, social_url=source, scraped_content=extracted_text)
+    _enqueue_job(analysis_id, source, extracted_text)
+
+    logger.info(f"[Textract] Job {analysis_id} da immagine '{file.filename}' accodato ({len(extracted_text)} char OCR).")
+    return AnalysisJobResponse(
+        analysis_id=analysis_id,
+        status="PENDING",
+        message="Immagine in analisi. Usa GET /api/analysis/{analysis_id} per lo stato.",
     )
 
 

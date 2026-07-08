@@ -6,3 +6,4 @@
 # ==============================================================================
 
 pytest==9.1.1
+httpx==0.28.1             # richiesto da fastapi.testclient.TestClient per i test HTTP

@@ -26,6 +26,7 @@ import {
   Link2,
   Tag,
   Cpu,
+  ScanText,
 } from "lucide-react";
 
 // ─── Profili di esempio: popolano il form per provare i diversi livelli di rischio ───
@@ -299,6 +300,37 @@ export default function App() {
     }
   };
 
+  // Analisi da immagine: carica il file su /api/analyze-image (OCR Textract lato
+  // backend), poi riusa lo stesso polling del flusso testuale.
+  const handleImageUpload = async (file: File) => {
+    setIsLoading(true);
+    setError(null);
+    setResult(null);
+    setJobStatus("PENDING");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/analyze-image", { method: "POST", body: fd });
+      if (!res.ok) {
+        let msg = `Il server ha risposto ${res.status}.`;
+        try {
+          const j = await res.json();
+          if (j.detail) msg = j.detail; // messaggio chiaro dal backend (es. "Nessun testo leggibile")
+        } catch {
+          /* corpo non JSON: usa il messaggio generico */
+        }
+        throw new Error(msg);
+      }
+      const job = await res.json();
+      startPolling(job.analysis_id);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Caricamento immagine non riuscito.");
+      setIsLoading(false);
+      setJobStatus(null);
+    }
+  };
+
   const handleClear = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = null;
@@ -353,7 +385,7 @@ export default function App() {
         {/* ── Intro ─────────────────────────────────────────────────────────── */}
         <section className="mb-8 max-w-2xl">
           <h2 className="font-display text-3xl sm:text-[38px] leading-[1.1] font-extrabold tracking-tight">
-            Quanto è esposto un profilo social?
+            Quanto è esposto il tuo profilo social?
           </h2>
           <p className="text-muted text-sm sm:text-base leading-relaxed mt-3">
             Da una biografia e pochi post, un estraneo può ricostruire chi sei, dove vivi e come contattarti.
@@ -432,6 +464,38 @@ export default function App() {
                 </button>
               </div>
             </form>
+
+            {/* Analisi da immagine (OCR Amazon Textract) */}
+            <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
+              <span className="block text-[11px] uppercase tracking-wider text-muted font-semibold mb-1">
+                Oppure analizza un'immagine
+              </span>
+              <p className="text-sm text-muted mb-3">
+                Uno screenshot o la foto di un documento: il testo visibile viene estratto con OCR (Amazon Textract) e
+                analizzato allo stesso modo.
+              </p>
+              <label
+                className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-sm font-semibold transition-colors ${
+                  isLoading
+                    ? "border-line text-faint cursor-not-allowed"
+                    : "border-line text-muted hover:text-ink hover:border-accent hover:bg-surface2 cursor-pointer"
+                }`}
+              >
+                <ScanText className="w-4 h-4" />
+                Carica immagine
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={isLoading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleImageUpload(f);
+                    e.target.value = ""; // consente di ricaricare lo stesso file
+                  }}
+                />
+              </label>
+            </div>
 
             {/* Profili di esempio */}
             <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
