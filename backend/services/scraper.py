@@ -97,10 +97,23 @@ def _instagram_extract(items: list) -> str:
 
 
 def _instagram_images(items: list) -> list:
-    """URL delle immagini dei post (per OCR retrospettivo). Solo post con foto."""
+    """
+    URL delle immagini dei post per l'OCR retrospettivo. Con due garanzie:
+      1. Profilo PRIVATO → nessuna immagine: non abbiamo accesso ai post, quindi
+         si analizzano solo bio e username (già estratti da extract_text).
+      2. Solo post PUBBLICATI DAL PROFILO stesso (ownerUsername == username del
+         profilo): si escludono ripubblicazioni/collab di altri account, così
+         l'analisi riguarda ciò che ha davvero esposto il titolare del profilo.
+    """
     urls = []
     for item in items:
+        if item.get("private"):
+            continue  # profilo privato: post non accessibili
+        owner = (item.get("username") or "").lower()
         for post in (item.get("latestPosts") or []):
+            post_owner = (post.get("ownerUsername") or "").lower()
+            if owner and post_owner and post_owner != owner:
+                continue  # post non del titolare (repost/collab): scartato
             if post.get("type") in ("Image", "Sidecar") and post.get("displayUrl"):
                 urls.append(post["displayUrl"])
     return urls
