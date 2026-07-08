@@ -54,9 +54,11 @@
   --c-faint: #a1a1aa;
   --c-accent: #be4a2f;
   --c-accentink: #ffffff;
-  --c-high: #d2493a;
-  --c-med: #c98a2a;
-  --c-low: #4f9a6a;
+  /* Colori rischio vividi e marcati (rosso/ambra/verde pieni), ben staccati dal
+     terracotta dell'accento e con buon contrasto su bianco. */
+  --c-high: #dc2626;
+  --c-med: #d97706;
+  --c-low: #16a34a;
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 30px -14px rgba(0, 0, 0, 0.14);
   color-scheme: light;
 }
