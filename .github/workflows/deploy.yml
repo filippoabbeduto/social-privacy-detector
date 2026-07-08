@@ -79,6 +79,13 @@ jobs:
             # risorse AWS. Senza --env-file il compose userebbe i default.
             docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans
 
+            # Riavvia nginx DOPO il ricreamento di frontend/backend: nginx risolve
+            # gli upstream (frontend:3000, backend:8000) all'avvio e ne tiene in
+            # cache l'IP; se i container a monte vengono ricreati con nuove immagini,
+            # nginx resta con l'IP vecchio e risponde 502 Bad Gateway. Il restart
+            # forza la ri-risoluzione DNS verso i container appena creati.
+            docker compose -f docker-compose.prod.yml --env-file .env.production restart nginx
+
             # Pulizia immagini vecchie
             docker image prune -f
 
