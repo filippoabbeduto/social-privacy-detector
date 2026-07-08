@@ -176,16 +176,20 @@ function StatCard({
   label,
   value,
   sub,
-  tone = "accent",
+  tone = "neutral",
 }: {
   Icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: React.ReactNode;
   sub?: React.ReactNode;
-  tone?: "accent" | RiskKey;
+  tone?: "neutral" | "accent" | RiskKey;
 }) {
+  // Solo la card del punteggio porta il colore del rischio; le altre restano
+  // neutre, così il colore comunica la severità e non fa "rumore" cromatico.
   const tint =
-    tone === "accent"
+    tone === "neutral"
+      ? "bg-surface2 text-muted"
+      : tone === "accent"
       ? "bg-accent/10 text-accent"
       : tone === "high"
       ? "bg-high/10 text-high"
