@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ChevronDown,
   Plus,
+  Download,
   AlertTriangle,
   ShieldCheck,
   ShieldAlert,
@@ -380,6 +381,46 @@ export default function App() {
     setIsLoading(false);
   };
 
+  // Scarica l'ultimo report come file di testo leggibile (nessun login: l'utente
+  // conserva in locale i report che ritiene utili). Generazione client-side.
+  const downloadReport = () => {
+    if (!result || !result.risk_assessment) return;
+    const r = riskInfo(result.risk_assessment.risk_level);
+    const pii = result.detected_pii || [];
+    const threats = result.social_engineering_report || [];
+    const L: string[] = [];
+    L.push("SOCIAL PRIVACY DETECTOR — Report di analisi");
+    L.push("=".repeat(48), "");
+    L.push(`Profilo/sorgente: ${result.social_url}`);
+    L.push(`ID analisi: ${result.analysis_id}`);
+    L.push(`Data: ${new Date().toLocaleString("it-IT")}`, "");
+    L.push(`VERDETTO: Rischio ${r.label.toLowerCase()} — ${result.risk_assessment.score}/100`);
+    if (result.risk_assessment.explanation) L.push(result.risk_assessment.explanation);
+    L.push("");
+    if (result.narrative_summary) {
+      L.push("SINTESI DELL'ESPOSIZIONE", result.narrative_summary, "");
+    }
+    L.push(`DATI PERSONALI RILEVATI (${pii.length})`);
+    pii.forEach((e) =>
+      L.push(`- ${piiMeta(e.type).label} [${e.type}]: ${e.text}  (conf. ${(e.score * 100).toFixed(0)}%)`)
+    );
+    L.push("");
+    L.push(`VETTORI DI INGEGNERIA SOCIALE (${threats.length})`);
+    threats.forEach((t) => {
+      L.push(`- [${t.severity}] ${t.threat_vector}`);
+      L.push(`  ${t.explanation}`);
+    });
+    L.push("", "Generato da Social Privacy Detector — SDCC, Università della Calabria");
+
+    const blob = new Blob([L.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `report-${result.analysis_id.slice(0, 8)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleClear = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = null;
@@ -703,6 +744,18 @@ export default function App() {
 
             {result && result.status === "COMPLETED" && result.risk_assessment && risk ? (
               <>
+                {/* Barra azioni: scarica l'ultimo report come file */}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={downloadReport}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-line py-2 px-3 text-sm font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Scarica report
+                  </button>
+                </div>
+
                 {/* KPI Summary (stile reference) */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <StatCard Icon={Gauge} tone={risk.key} label="Punteggio" value={`${result.risk_assessment.score}`} sub="/ 100" />
