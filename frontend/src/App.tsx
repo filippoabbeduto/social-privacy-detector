@@ -383,42 +383,93 @@ export default function App() {
 
   // Scarica l'ultimo report come file di testo leggibile (nessun login: l'utente
   // conserva in locale i report che ritiene utili). Generazione client-side.
-  const downloadReport = () => {
+  const downloadReport = async () => {
     if (!result || !result.risk_assessment) return;
+    // jsPDF caricato solo qui (dynamic import): non pesa sul bundle iniziale.
+    const { jsPDF } = await import("jspdf");
     const r = riskInfo(result.risk_assessment.risk_level);
     const pii = result.detected_pii || [];
     const threats = result.social_engineering_report || [];
-    const L: string[] = [];
-    L.push("SOCIAL PRIVACY DETECTOR — Report di analisi");
-    L.push("=".repeat(48), "");
-    L.push(`Profilo/sorgente: ${result.social_url}`);
-    L.push(`ID analisi: ${result.analysis_id}`);
-    L.push(`Data: ${new Date().toLocaleString("it-IT")}`, "");
-    L.push(`VERDETTO: Rischio ${r.label.toLowerCase()} — ${result.risk_assessment.score}/100`);
-    if (result.risk_assessment.explanation) L.push(result.risk_assessment.explanation);
-    L.push("");
-    if (result.narrative_summary) {
-      L.push("SINTESI DELL'ESPOSIZIONE", result.narrative_summary, "");
-    }
-    L.push(`DATI PERSONALI RILEVATI (${pii.length})`);
-    pii.forEach((e) =>
-      L.push(`- ${piiMeta(e.type).label} [${e.type}]: ${e.text}  (conf. ${(e.score * 100).toFixed(0)}%)`)
-    );
-    L.push("");
-    L.push(`VETTORI DI INGEGNERIA SOCIALE (${threats.length})`);
-    threats.forEach((t) => {
-      L.push(`- [${t.severity}] ${t.threat_vector}`);
-      L.push(`  ${t.explanation}`);
-    });
-    L.push("", "Generato da Social Privacy Detector — SDCC, Università della Calabria");
+    const riskColor: [number, number, number] =
+      r.key === "high" ? [220, 38, 38] : r.key === "med" ? [217, 119, 6] : [22, 163, 74];
 
-    const blob = new Blob([L.join("\n")], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `report-${result.analysis_id.slice(0, 8)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 48;
+    const width = pageW - margin * 2;
+    let y = margin;
+
+    const ensure = (h: number) => {
+      if (y + h > pageH - margin) {
+        doc.addPage();
+        y = margin;
+      }
+    };
+    // Scrive un blocco di testo con a-capo automatico e colore/dimensione dati.
+    const write = (str: string, size = 11, bold = false, color: [number, number, number] = [40, 40, 40], gap = 1.4) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(size);
+      doc.setTextColor(color[0], color[1], color[2]);
+      doc.splitTextToSize(str, width).forEach((ln: string) => {
+        ensure(size * gap);
+        doc.text(ln, margin, y);
+        y += size * gap;
+      });
+    };
+    const space = (h = 8) => { y += h; };
+    const heading = (str: string) => {
+      space(10);
+      write(str, 12, true, [17, 17, 17]);
+      doc.setDrawColor(225);
+      doc.line(margin, y - 2, pageW - margin, y - 2);
+      space(6);
+    };
+
+    write("Social Privacy Detector", 18, true, [17, 17, 17]);
+    write("Report di analisi dell'esposizione pubblica", 11, false, [110, 110, 110]);
+    space(10);
+    write(`Profilo / sorgente: ${result.social_url}`, 10, false, [90, 90, 90]);
+    write(`ID analisi: ${result.analysis_id}`, 10, false, [90, 90, 90]);
+    write(`Data: ${new Date().toLocaleString("it-IT")}`, 10, false, [90, 90, 90]);
+
+    heading("Verdetto");
+    write(`Rischio ${r.label.toLowerCase()} — ${result.risk_assessment.score}/100`, 14, true, riskColor);
+    if (result.risk_assessment.explanation) {
+      space(2);
+      write(result.risk_assessment.explanation, 10, false, [60, 60, 60]);
+    }
+
+    if (result.narrative_summary) {
+      heading("Sintesi dell'esposizione");
+      write(result.narrative_summary, 10, false, [60, 60, 60]);
+    }
+
+    heading(`Dati personali rilevati (${pii.length})`);
+    if (pii.length) {
+      pii.forEach((e) =>
+        write(`•  ${piiMeta(e.type).label} [${e.type}]: ${e.text}  —  conf. ${(e.score * 100).toFixed(0)}%`, 10, false, [55, 55, 55])
+      );
+    } else {
+      write("Nessun dato personale leggibile.", 10, false, [110, 110, 110]);
+    }
+
+    heading(`Vettori di ingegneria sociale (${threats.length})`);
+    threats.forEach((t) => {
+      write(`[${t.severity}]  ${t.threat_vector}`, 10.5, true, [40, 40, 40]);
+      write(t.explanation, 10, false, [70, 70, 70]);
+      space(3);
+    });
+
+    space(12);
+    write(
+      "Generato da Social Privacy Detector — SDCC, Università della Calabria. Analisi basata esclusivamente su contenuti pubblici.",
+      8.5,
+      false,
+      [140, 140, 140]
+    );
+
+    doc.save(`report-${result.analysis_id.slice(0, 8)}.pdf`);
   };
 
   const handleClear = () => {
