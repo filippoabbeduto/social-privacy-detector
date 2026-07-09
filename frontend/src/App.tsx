@@ -8,6 +8,8 @@ import {
   RefreshCw,
   Trash2,
   ChevronRight,
+  ChevronDown,
+  Plus,
   AlertTriangle,
   ShieldCheck,
   ShieldAlert,
@@ -234,6 +236,10 @@ export default function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<number | null>(null);
+  // Input opzionali nascosti di default: si aprono al click dell'utente per
+  // tenere il form pulito e focalizzato sull'unico campo obbligatorio (l'URL).
+  const [showBio, setShowBio] = useState(false);
+  const [showExamples, setShowExamples] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => () => {
@@ -244,6 +250,7 @@ export default function App() {
     setSocialUrl(DEMO_PROFILES[index].url);
     setScrapedContent(DEMO_PROFILES[index].content);
     setActiveTemplate(index);
+    setShowBio(true); // mostra il testo popolato dal template
     setError(null);
   };
 
@@ -342,6 +349,8 @@ export default function App() {
     setResult(null);
     setJobStatus(null);
     setActiveTemplate(null);
+    setShowBio(false);
+    setShowExamples(false);
     setIsLoading(false);
   };
 
@@ -420,22 +429,34 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="scraped-content" className="block text-sm font-semibold">
-                  Biografia o testo dei post <span className="text-faint font-normal">(facoltativo)</span>
-                </label>
-                <textarea
-                  id="scraped-content"
-                  rows={6}
-                  value={scrapedContent}
-                  onChange={(e) => {
-                    setScrapedContent(e.target.value);
-                    setActiveTemplate(null);
-                  }}
-                  placeholder="Se lo lasci vuoto, il testo pubblico viene recuperato automaticamente dal profilo indicato."
-                  className="w-full rounded-xl border border-line bg-bg p-3.5 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus:border-accent transition-colors resize-y"
-                />
-              </div>
+              {/* Testo/biografia manuale: opzionale, nascosto dietro un link */}
+              {!showBio ? (
+                <button
+                  type="button"
+                  onClick={() => setShowBio(true)}
+                  className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-accent transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Aggiungi bio o testo dei post <span className="text-faint">(facoltativo)</span>
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <label htmlFor="scraped-content" className="block text-sm font-semibold">
+                    Biografia o testo dei post <span className="text-faint font-normal">(facoltativo)</span>
+                  </label>
+                  <textarea
+                    id="scraped-content"
+                    rows={6}
+                    value={scrapedContent}
+                    onChange={(e) => {
+                      setScrapedContent(e.target.value);
+                      setActiveTemplate(null);
+                    }}
+                    placeholder="Se lo lasci vuoto, il testo pubblico viene recuperato automaticamente dal profilo indicato."
+                    className="w-full rounded-xl border border-line bg-bg p-3.5 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus:border-accent transition-colors resize-y"
+                  />
+                </div>
+              )}
 
               <div className="flex gap-3 pt-1">
                 <button
@@ -499,12 +520,17 @@ export default function App() {
               </label>
             </div>
 
-            {/* Profili di esempio */}
+            {/* Profili di esempio (collassabili, chiusi di default) */}
             <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
-              <span className="block text-[11px] uppercase tracking-wider text-muted font-semibold mb-3">
-                Profili di esempio
-              </span>
-              <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowExamples((v) => !v)}
+                className="w-full flex items-center justify-between text-[11px] uppercase tracking-wider text-muted font-semibold hover:text-ink transition-colors"
+              >
+                <span>Profili di esempio</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${showExamples ? "rotate-180" : ""}`} />
+              </button>
+              <div className={`space-y-2 ${showExamples ? "mt-3" : "hidden"}`}>
                 {DEMO_PROFILES.map((p, idx) => (
                   <button
                     key={idx}

@@ -11,22 +11,19 @@
 
 /* Font bundled (offline). Plus Jakarta Sans = display + testo (sans geometrico
    amichevole, look SaaS moderno). IBM Plex Mono = SOLO stringhe tecniche/ID. */
-/* Fraunces = display serif contemporaneo con carattere editoriale (titoli, hero,
-   punteggi). Hanken Grotesk = grotesque umanista, quieto e leggibile per il testo.
-   IBM Plex Mono = solo dati estratti dalla macchina (PII, ID). */
-@import "@fontsource/fraunces/500.css";
-@import "@fontsource/fraunces/600.css";
-@import "@fontsource/fraunces/700.css";
-@import "@fontsource/hanken-grotesk/400.css";
-@import "@fontsource/hanken-grotesk/500.css";
-@import "@fontsource/hanken-grotesk/600.css";
-@import "@fontsource/hanken-grotesk/700.css";
+/* Inter = grotesque neutro in stile Helvetica per tutta l'interfaccia (titoli e
+   testo). IBM Plex Mono = solo dati estratti dalla macchina (PII, ID). */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/inter/800.css";
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
 
 @theme {
-  --font-display: "Fraunces", Georgia, ui-serif, serif;
-  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
   --color-bg: var(--c-bg);
