@@ -365,19 +365,12 @@ export default function App() {
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 border-b border-line bg-bg/85 backdrop-blur">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {/* Marchio: due "righe redatte" (barre color inchiostro) — il simbolo
-                della censura/privacy. Niente icona generica, si adatta al tema. */}
-            <div className="flex flex-col gap-1.5 shrink-0" aria-hidden>
-              <span className="block h-2 w-7 rounded-full bg-ink" />
-              <span className="block h-2 w-4 rounded-full bg-ink" />
+          {/* Wordmark puro: solo il nome, nessuna icona. */}
+          <div className="leading-tight">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-faint">
+              Università della Calabria · SDCC 25/26
             </div>
-            <div className="leading-tight">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-faint">
-                Università della Calabria · SDCC 25/26
-              </div>
-              <h1 className="font-display text-[17px] font-bold tracking-tight">Social Privacy Detector</h1>
-            </div>
+            <h1 className="font-display text-[17px] font-bold tracking-tight">Social Privacy Detector</h1>
           </div>
 
           {/* Gruppo destro: stato AWS, tab modalità (Profilo/Immagine), tema */}
