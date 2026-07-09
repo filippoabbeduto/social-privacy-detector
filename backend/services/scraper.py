@@ -6,12 +6,16 @@
 # social pubblici. Apify gestisce internamente la rotazione degli IP,
 # i proxy residenziali e la simulazione browser (Playwright/Puppeteer).
 #
-# Piattaforme supportate:
+# Piattaforme supportate (scraping reale verificato col piano Apify):
 #   - Instagram (bio, post, fullName, externalUrl)
 #   - TikTok    (bio, nickname, post descriptions)
-#   - Twitter/X (bio, tweets, displayName, location)
 #   - Facebook  (bio, about, name)
-#   - LinkedIn  (headline, summary, skills, location)
+#
+# NOTA: Twitter/X e LinkedIn NON sono inclusi. Sul piano gratuito Apify i loro
+# Actor non restituiscono dati (X: solo placeholder {"noResults"}/{"demo"};
+# LinkedIn: serve cookie/autenticazione). Servono un abbonamento Apify a pagamento
+# o, per X, l'API ufficiale (dal 2026 solo pay-per-use, senza free tier).
+# Dettagli e motivazioni nella relazione (capitolo Limitazioni).
 #
 # In mock mode restituisce biografie simulate per la demo offline.
 # ==============================================================================
@@ -174,55 +178,12 @@ _register_platform(
 )
 
 
-# ── TWITTER / X ──────────────────────────────────────────────────────────────
-
-def _twitter_input(url: str) -> dict:
-    # Estrae lo username dall'URL
-    match = re.search(r'(?:twitter|x)\.com/([a-zA-Z0-9_]+)', url)
-    username = match.group(1) if match else url
-    return {
-        "twitterHandles": [username],
-        "maxTweets": 10,
-        "addUserInfo": True,
-    }
-
-
-def _twitter_extract(items: list) -> str:
-    texts = []
-    for item in items:
-        # Info profilo utente
-        if item.get("author") and isinstance(item["author"], dict):
-            author = item["author"]
-            if author.get("name"):
-                texts.append(f"Nome: {author['name']}")
-            if author.get("description"):
-                texts.append(author["description"])
-            if author.get("location"):
-                texts.append(f"Location: {author['location']}")
-            if author.get("url"):
-                texts.append(author["url"])
-        # Campi top-level (formato alternativo)
-        if item.get("description"):
-            texts.append(item["description"])
-        if item.get("displayName"):
-            texts.append(f"Nome: {item['displayName']}")
-        if item.get("location"):
-            texts.append(f"Location: {item['location']}")
-        # Testi dei tweet
-        if item.get("full_text"):
-            texts.append(item["full_text"])
-        if item.get("text"):
-            texts.append(item["text"])
-    return " | ".join(texts)
-
-
-_register_platform(
-    name="twitter",
-    url_patterns=["twitter.com", "x.com"],
-    actor_id="apidojo~tweet-scraper",
-    build_input=_twitter_input,
-    extract_text=_twitter_extract,
-)
+# ── TWITTER / X — RIMOSSO ────────────────────────────────────────────────────
+# Twitter/X non è supportato: gli Actor Apify per X non restituiscono dati sul
+# piano gratuito (vedi nota in testa al file). Se in futuro si attiva un piano
+# Apify a pagamento, basta ri-registrare una piattaforma "twitter" con l'Actor
+# adeguato (campo input 'maxItems' per il limite, output: oggetto 'author' +
+# campo 'text' per tweet), sullo stesso schema delle altre piattaforme.
 
 
 # ── FACEBOOK ─────────────────────────────────────────────────────────────────
@@ -270,62 +231,12 @@ _register_platform(
 )
 
 
-# ── LINKEDIN ─────────────────────────────────────────────────────────────────
-
-def _linkedin_input(url: str) -> dict:
-    return {"profileUrls": [url]}
-
-
-def _linkedin_extract(items: list) -> str:
-    texts = []
-    for item in items:
-        if item.get("fullName"):
-            texts.append(f"Nome: {item['fullName']}")
-        if item.get("headline"):
-            texts.append(item["headline"])
-        if item.get("summary"):
-            texts.append(item["summary"])
-        if item.get("location"):
-            texts.append(f"Location: {item['location']}")
-        if item.get("email"):
-            texts.append(item["email"])
-        # Esperienze lavorative
-        if item.get("experience"):
-            for exp in item["experience"][:3]:
-                parts = []
-                if exp.get("title"):
-                    parts.append(exp["title"])
-                if exp.get("companyName"):
-                    parts.append(f"presso {exp['companyName']}")
-                if exp.get("location"):
-                    parts.append(f"a {exp['location']}")
-                if parts:
-                    texts.append("Esperienza: " + " ".join(parts))
-        # Istruzione
-        if item.get("education"):
-            for edu in item["education"][:2]:
-                parts = []
-                if edu.get("schoolName"):
-                    parts.append(edu["schoolName"])
-                if edu.get("degreeName"):
-                    parts.append(edu["degreeName"])
-                if parts:
-                    texts.append("Studi: " + " - ".join(parts))
-        # Skills
-        if item.get("skills"):
-            skill_names = [s.get("name", s) if isinstance(s, dict) else str(s)
-                           for s in item["skills"][:5]]
-            texts.append(f"Competenze: {', '.join(skill_names)}")
-    return " | ".join(texts)
-
-
-_register_platform(
-    name="linkedin",
-    url_patterns=["linkedin.com"],
-    actor_id="curious_coder~linkedin-profile-scraper",
-    build_input=_linkedin_input,
-    extract_text=_linkedin_extract,
-)
+# ── LINKEDIN — RIMOSSO ───────────────────────────────────────────────────────
+# LinkedIn non è supportato, stessa ragione di Twitter/X: l'actor Apify
+# (curious_coder/linkedin-profile-scraper) sul piano gratuito non restituisce
+# dati (serve cookie/autenticazione o un piano a pagamento). Ri-attivabile
+# registrando una piattaforma "linkedin" con l'actor adeguato, sullo stesso
+# schema delle altre piattaforme.
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -339,7 +250,8 @@ class ScraperService:
     Modalità MOCK: restituisce biografie pre-confezionate per diversi scenari di test.
     Modalità PRODUZIONE: invoca Apify REST API per scraping reale multi-piattaforma.
 
-    Piattaforme supportate: Instagram, TikTok, Twitter/X, Facebook, LinkedIn.
+    Piattaforme supportate: Instagram, TikTok, Facebook.
+    (Twitter/X e LinkedIn esclusi: i loro Actor Apify non restituiscono dati sul piano free.)
     """
 
     SUPPORTED_PLATFORMS = list(PLATFORM_CONFIGS.keys())
@@ -432,14 +344,6 @@ class ScraperService:
                 "Giornata al mare a Tropea, sempre Tropea, amo Tropea! "
                 "Contatto per collab: marco.vibes@gmail.com"
             )
-        elif "linkedin" in url_lower:
-            return (
-                "Nome: Andrea Bianchi | Senior Cloud Engineer presso Accenture. "
-                "Location: Roma, Italia. Esperienza: Cloud Architect presso Deloitte a Milano. "
-                "Studi: Università della Calabria - Laurea Magistrale in Ingegneria Informatica. "
-                "Competenze: AWS, Terraform, Kubernetes, Docker, Python. "
-                "Contatto: andrea.bianchi@accenture.com | +39 347-9876543"
-            )
         elif "facebook" in url_lower or "fb.com" in url_lower:
             return (
                 "Nome: Giulia Ferretti | Città: Napoli, Italia. "
@@ -447,14 +351,6 @@ class ScraperService:
                 "Lavoro: Marketing Manager presso Enel. "
                 "Compleanno: 10 agosto 1995. "
                 "giulia.ferretti@enel.com | https://giuliaferretti.it"
-            )
-        elif "twitter" in url_lower or "x.com" in url_lower:
-            return (
-                "Nome: Luca Dev | Bio: Full-stack developer @Reply Milano. "
-                "Location: Milano, Italia. "
-                "Oggi workshop su Kubernetes al Politecnico di Milano! "
-                "Per collaborazioni: luca.dev@reply.it "
-                "Il mio blog: https://lucadev.tech"
             )
         else:
             return (
@@ -491,20 +387,23 @@ class ScraperService:
         try:
             import requests
 
-            # Esegui l'Actor in modo sincrono e ottieni direttamente i risultati
+            # Esegui l'Actor in modo sincrono e ottieni direttamente i risultati.
+            # Il token viaggia nell'header Authorization (non come query param): così
+            # NON finisce negli URL registrati nei log/access-log. Non logghiamo il
+            # payload perché contiene lo username analizzato (dato personale).
             run_url = f"{self.apify_base_url}/acts/{actor_id}/run-sync-get-dataset-items"
             payload = config["build_input"](social_url)
-            headers = {"Content-Type": "application/json"}
-            params = {"token": self.apify_token}
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.apify_token}",
+            }
 
-            logger.info(f"[Apify] Invocazione sincrona: {run_url}")
-            logger.info(f"[Apify] Payload: {payload}")
+            logger.info(f"[Apify] Invocazione sincrona actor {actor_id}")
 
             response = requests.post(
                 run_url,
                 json=payload,
                 headers=headers,
-                params=params,
                 timeout=180,  # l'API sincrona di Apify ha un limite di 300s
             )
             response.raise_for_status()

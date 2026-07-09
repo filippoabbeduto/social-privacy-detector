@@ -112,8 +112,6 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
     has_identity_anchor = "DATE_OF_BIRTH" in present_types
     has_location        = "LOCATION" in present_types
     has_org             = "ORGANIZATION" in present_types
-    has_url             = "URL" in present_types
-    has_username        = "USERNAME" in present_types
 
     # --- Combinazioni critiche ---
     full_identity_combo   = {"EMAIL", "PHONE_NUMBER", "DATE_OF_BIRTH"}.issubset(present_types)
@@ -123,11 +121,8 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
     max_exposure          = {"EMAIL", "PHONE_NUMBER", "DATE_OF_BIRTH", "LOCATION"}.issubset(present_types)
 
     # --- Conteggi aggregati ---
-    total_pii_count   = len(detected_piis)
     unique_type_count = len(present_types)
-    critical_count    = sum(1 for t in ["EMAIL", "PHONE_NUMBER", "DATE_OF_BIRTH"] if t in present_types)
     contextual_count  = sum(1 for t in ["LOCATION", "ORGANIZATION", "URL", "USERNAME"] if t in present_types)
-    avg_confidence    = sum(pii_by_type.values()) / len(pii_by_type) if pii_by_type else 0.0
 
     return {
         "pii_by_type":          pii_by_type,
@@ -136,20 +131,13 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
         "present_types":        present_types,
         "has_direct_contact":   has_direct_contact,
         "has_identity_anchor":  has_identity_anchor,
-        "has_location":         has_location,
-        "has_org":              has_org,
-        "has_url":              has_url,
-        "has_username":         has_username,
         "full_identity_combo":  full_identity_combo,
         "spear_phishing_ready": spear_phishing_ready,
         "social_graph_exposed": social_graph_exposed,
         "sim_swap_risk":        sim_swap_risk,
         "max_exposure":         max_exposure,
-        "total_pii_count":      total_pii_count,
         "unique_type_count":    unique_type_count,
-        "critical_count":       critical_count,
         "contextual_count":     contextual_count,
-        "avg_confidence":       avg_confidence,
     }
 
 

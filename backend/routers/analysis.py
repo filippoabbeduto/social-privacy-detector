@@ -16,13 +16,14 @@ import os
 import json
 import uuid
 import time
+import socket
 import logging
+import ipaddress
 import threading
 from typing import Optional, List
+from urllib.parse import urlparse
 
 import requests
-# NOTA: rimosso "import json" — era usato solo dal vecchio percorso SQS (ora
-# eliminato per coerenza architetturale, vedi _enqueue_job).
 
 from fastapi import APIRouter, status, HTTPException, UploadFile, File
 
@@ -30,7 +31,6 @@ from models.schemas import (
     ProfileAnalysisRequest,
     AnalysisJobResponse,
     AnalysisReportResponse,
-    RiskAssessment,
 )
 from services.pii_detector import PIIDetectorService
 from services.report_generator import ReportGeneratorService
@@ -62,24 +62,81 @@ storage_service = StorageService()
 # Configurabile via env; default prudente.
 MAX_POST_IMAGES_OCR = int(os.getenv("MAX_POST_IMAGES_OCR", "5"))
 
+# Tetto di dimensione per le immagini analizzate (upload utente e download dai post).
+# Textract (sincrono) accetta fino a ~10 MB: teniamo un margine e blocchiamo prima di
+# caricare in memoria un file arbitrariamente grande (difesa anti-DoS).
+MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+
+
+def _is_public_https_url(url: str) -> bool:
+    """
+    Difesa anti-SSRF: accetta solo URL https il cui host NON risolve a un
+    indirizzo interno (privato, loopback, link-local — incluso l'endpoint di
+    metadata EC2 169.254.169.254 — riservato o multicast). Gli URL delle immagini
+    provengono dallo scraping e sono quindi input non fidato: senza questo filtro
+    il backend potrebbe essere indotto a interrogare servizi della rete interna.
+    ponytail: la risoluzione DNS avviene qui e la connessione dopo (piccola
+    finestra TOCTOU/DNS-rebinding); per il contesto del progetto è accettabile,
+    l'irrobustimento sarebbe pinnare l'IP validato sulla connessione.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    try:
+        addrinfos = socket.getaddrinfo(parsed.hostname, None)
+    except Exception:
+        return False
+    for info in addrinfos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast):
+            return False
+    return True
+
+
+def _fetch_image_safely(url: str) -> Optional[bytes]:
+    """
+    Scarica un'immagine da un URL scrapato con difese anti-SSRF e anti-DoS:
+    solo https verso host pubblici (vedi _is_public_https_url), NESSUN redirect
+    (un redirect potrebbe puntare a un IP interno aggirando il primo controllo) e
+    tetto di dimensione MAX_IMAGE_BYTES applicato in streaming (evita di caricare
+    in memoria un file arbitrariamente grande). Ritorna i byte o None.
+    """
+    if not _is_public_https_url(url):
+        logger.warning(f"[Textract] URL immagine rifiutato (guardia SSRF): {url[:60]}")
+        return None
+    try:
+        with requests.get(url, timeout=15, stream=True, allow_redirects=False) as resp:
+            if not resp.ok:
+                return None
+            data = bytearray()
+            for chunk in resp.iter_content(64 * 1024):
+                data.extend(chunk)
+                if len(data) > MAX_IMAGE_BYTES:
+                    logger.warning(f"[Textract] Immagine oltre il limite, scartata: {url[:60]}")
+                    return None
+            return bytes(data) or None
+    except Exception as e:
+        logger.warning(f"[Textract] Download immagine fallito ({url[:60]}...): {e}")
+        return None
+
 
 def _ocr_post_images(image_urls: List[str]) -> List[str]:
     """
-    Scarica le prime MAX_POST_IMAGES_OCR immagini dei post e ne estrae il testo
-    con Amazon Textract (OCR retrospettivo). Cattura le PII testuali dentro le
-    foto (documenti, cartelli, screenshot), non solo nella biografia.
-    Ogni immagine è indipendente: un errore su una non blocca le altre.
+    Scarica le prime MAX_POST_IMAGES_OCR immagini dei post (in modo sicuro, vedi
+    _fetch_image_safely) e ne estrae il testo con Amazon Textract (OCR
+    retrospettivo). Cattura le PII testuali dentro le foto (documenti, cartelli,
+    screenshot), non solo nella biografia. Ogni immagine è indipendente: un errore
+    o uno scarto su una non blocca le altre.
     """
     texts: List[str] = []
     for url in image_urls[:MAX_POST_IMAGES_OCR]:
-        try:
-            resp = requests.get(url, timeout=15)
-            if resp.ok and resp.content:
-                extracted = pii_service.extract_text_from_image(resp.content)
-                if extracted and extracted.strip():
-                    texts.append(extracted.strip())
-        except Exception as e:
-            logger.warning(f"[Textract] OCR immagine post fallito ({url[:60]}...): {e}")
+        content = _fetch_image_safely(url)
+        if not content:
+            continue
+        extracted = pii_service.extract_text_from_image(content)
+        if extracted and extracted.strip():
+            texts.append(extracted.strip())
     if texts:
         logger.info(f"[Textract] OCR post: testo estratto da {len(texts)} immagini.")
     return texts
@@ -233,7 +290,7 @@ def analyze_profile(payload: ProfileAnalysisRequest):
     Accoda una nuova analisi di un profilo social.
 
     NON esegue la pipeline in linea — la delega a un worker asincrono
-    (thread locale in mock, Lambda in produzione).
+    (thread in-process, sia in mock sia in produzione).
 
     Il client riceve un analysis_id e fa polling su GET /api/analysis/{id}
     per ottenere i risultati quando lo stato diventa COMPLETED.
@@ -250,7 +307,7 @@ def analyze_profile(payload: ProfileAnalysisRequest):
         scraped_content=payload.scraped_content,
     )
 
-    # 3. Accoda il lavoro (thread mock o SQS)
+    # 3. Accoda il lavoro (thread in-process)
     _enqueue_job(analysis_id, payload.social_url, payload.scraped_content)
 
     # 4. Risponde immediatamente con 202 Accepted
@@ -265,10 +322,6 @@ def analyze_profile(payload: ProfileAnalysisRequest):
 # ──────────────────────────────────────────────────────────────────────────────
 # POST /api/analyze-image - OCR (Amazon Textract) + analisi PII su un'immagine
 # ──────────────────────────────────────────────────────────────────────────────
-
-# Textract detect_document_text (sincrono) accetta fino a ~10 MB: teniamo un
-# margine e blocchiamo prima di caricare tutto in memoria.
-MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
 @router.post("/analyze-image", response_model=AnalysisJobResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -354,18 +407,9 @@ def get_analysis(analysis_id: str):
         error=record.get("error"),
     )
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# GET /api/analyses - Lista storico analisi
-# ──────────────────────────────────────────────────────────────────────────────
-
-@router.get("/analyses", status_code=status.HTTP_200_OK)
-def list_analyses():
-    """
-    Restituisce la lista di tutte le analisi effettuate (storico).
-    """
-    analyses = storage_service.list_analyses()
-    return {
-        "total": len(analyses),
-        "analyses": analyses
-    }
+# NOTA sicurezza: RIMOSSO l'endpoint GET /api/analyses. Restituiva l'elenco di
+# TUTTE le analisi con le relative PII e, non essendoci autenticazione, chiunque
+# avrebbe potuto leggere i dati personali di tutti gli utenti (information
+# disclosure). Il singolo risultato resta accessibile solo a chi conosce il
+# proprio analysis_id (UUID non indovinabile), coerentemente con la
+# minimizzazione dei dati. L'endpoint non era usato dal frontend.

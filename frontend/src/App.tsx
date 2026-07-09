@@ -47,26 +47,14 @@ const DEMO_PROFILES = [
       "Studente UniCal a Cosenza. Nato il 22/06/2000. Giornata a Roma, sempre a Roma, amo Roma! Seguitemi su IG: @marco_vibes — collab: marco.vibes@gmail.com",
   },
   {
-    label: "LinkedIn — dati professionali",
-    url: "https://linkedin.com/in/andrea-bianchi-cloud",
-    content:
-      "Senior Cloud Engineer presso Accenture a Roma. Ex Deloitte Milano. Laurea Magistrale all'Università della Calabria. Contatto: andrea.bianchi@accenture.com | +39 347-9876543",
-  },
-  {
     label: "Facebook — dati personali",
     url: "https://facebook.com/giulia.ferretti.95",
     content:
       "Città: Napoli. Città natale: Cosenza. Studi: Università Federico II. Lavoro: Marketing Manager presso Enel. Compleanno: 10 agosto 1995. giulia.ferretti@enel.com",
   },
   {
-    label: "Twitter/X — sviluppatore",
-    url: "https://x.com/luca_dev_reply",
-    content:
-      "Full-stack developer @Reply Milano. Oggi workshop su Kubernetes al Politecnico di Milano! Per collaborazioni: luca.dev@reply.it — blog: https://lucadev.tech",
-  },
-  {
     label: "Profilo consapevole — rischio basso",
-    url: "https://twitter.com/cyber_shield_unical",
+    url: "https://instagram.com/cyber_shield_unical",
     content:
       "Appassionato di OSINT e sicurezza informatica. Ricorda di limitare l'esposizione di informazioni identificabili sui tuoi canali pubblici!",
   },
@@ -421,9 +409,7 @@ export default function App() {
     const heading = (str: string) => {
       space(10);
       write(str, 12, true, [17, 17, 17]);
-      doc.setDrawColor(225);
-      doc.line(margin, y - 2, pageW - margin, y - 2);
-      space(6);
+      space(4);
     };
 
     write("Social Privacy Detector", 18, true, [17, 17, 17]);

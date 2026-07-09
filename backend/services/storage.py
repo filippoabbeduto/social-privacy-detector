@@ -12,9 +12,10 @@
 import os
 import json
 import logging
+import threading
 from decimal import Decimal
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger("social-privacy-backend")
 
@@ -70,8 +71,12 @@ class StorageService:
         self.table_name = os.getenv("DYNAMODB_TABLE", "SocialPrivacyAnalyses")
         self.bucket_name = os.getenv("S3_BUCKET", "social-privacy-reports")
 
-        # In-memory store per mock mode
+        # In-memory store per mock mode. Il worker gira in un thread separato
+        # mentre le richieste HTTP leggono/scrivono: un lock serializza gli accessi
+        # al dizionario condiviso (evita race read-modify-write). In produzione lo
+        # store è DynamoDB e il lock non entra in gioco.
         self._mock_store: Dict[str, Dict[str, Any]] = {}
+        self._mock_lock = threading.Lock()
 
         if not AWS_MOCK:
             try:
@@ -172,21 +177,6 @@ class StorageService:
         """
         return self._get_record(analysis_id)
 
-    def list_analyses(self) -> List[Dict[str, Any]]:
-        """
-        Ritorna la lista di tutte le analisi salvate.
-        """
-        if AWS_MOCK or not self.dynamodb_table:
-            logger.info("[MOCK DynamoDB] Lista analisi dalla memoria locale")
-            return list(self._mock_store.values())
-
-        try:
-            response = self.dynamodb_table.scan()
-            return response.get("Items", [])
-        except Exception as e:
-            logger.error(f"Errore DynamoDB scan: {e}")
-            return list(self._mock_store.values())
-
     # ──────────────────────────────────────────────────────────────────────────
     # S3: Upload Report / File
     # ──────────────────────────────────────────────────────────────────────────
@@ -224,7 +214,8 @@ class StorageService:
         """Scrive un record nello storage (mock dict o DynamoDB)."""
         if AWS_MOCK or not self.dynamodb_table:
             logger.info(f"[MOCK DynamoDB] Scrittura job {analysis_id} (status: {record.get('status')})")
-            self._mock_store[analysis_id] = record
+            with self._mock_lock:
+                self._mock_store[analysis_id] = record
             return True
 
         try:
@@ -237,17 +228,20 @@ class StorageService:
             return True
         except Exception as e:
             logger.error(f"Errore DynamoDB put_item: {e}")
-            self._mock_store[analysis_id] = record
+            with self._mock_lock:
+                self._mock_store[analysis_id] = record
             return False
 
     def _get_record(self, analysis_id: str) -> Optional[Dict[str, Any]]:
         """Legge un record dallo storage (mock dict o DynamoDB)."""
         if AWS_MOCK or not self.dynamodb_table:
-            return self._mock_store.get(analysis_id)
+            with self._mock_lock:
+                return self._mock_store.get(analysis_id)
 
         try:
             response = self.dynamodb_table.get_item(Key={"analysis_id": analysis_id})
             return response.get("Item")
         except Exception as e:
             logger.error(f"Errore DynamoDB get_item: {e}")
-            return self._mock_store.get(analysis_id)
+            with self._mock_lock:
+                return self._mock_store.get(analysis_id)

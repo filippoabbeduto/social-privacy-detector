@@ -1,6 +1,6 @@
 # ==============================================================================
 # SOCIAL PRIVACY DETECTOR - MAIN BACKEND (FastAPI + Boto3 / AWS Mock)
-# Corso di Laurea Triennale in Ingegneria Informatica - a.a. 2025/26
+# Corso di Laurea Magistrale in Ingegneria Informatica - a.a. 2025/26
 # Progetto di Sistemi Distribuiti e Cloud Computing (SDCC)
 # ==============================================================================
 
