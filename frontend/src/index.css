@@ -120,7 +120,29 @@
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* ── Signature: barra di redazione che si ritrae rivelando il dato esposto ─────
+   Il valore reale (PII) sta sotto; una barra color inchiostro lo copre e si
+   "apre" da sinistra a destra come una censura rimossa — rende visibile ciò che
+   il profilo espone pubblicamente. */
+.redact {
+  position: relative;
+  display: inline-block;
+}
+.redact > .redact-bar {
+  position: absolute;
+  inset: 0;
+  background: var(--c-ink);
+  border-radius: 3px;
+  transform-origin: right center;
+  animation: redact-reveal 0.7s cubic-bezier(0.7, 0, 0.2, 1) forwards;
+}
+@keyframes redact-reveal {
+  0%, 40% { transform: scaleX(1); }
+  100% { transform: scaleX(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rise { animation: none; }
+  .redact > .redact-bar { display: none; } /* dato subito visibile, niente moto */
   body { transition: none; }
 }

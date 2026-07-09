@@ -143,12 +143,35 @@ function SeverityPill({ level }: { level: string }) {
   );
 }
 
-// Gauge radiale del punteggio (SVG, dati reali: score/100).
+// Anima un numero da 0 al valore target (easeOutCubic). Rispetta reduced-motion.
+function useCountUp(target: number, duration = 850): number {
+  const [val, setVal] = useState(0);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setVal(target);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setVal(Math.round(target * eased));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return val;
+}
+
+// Gauge radiale del punteggio (SVG). Numero e anello "contano" da 0 all'apertura.
 function ScoreGauge({ score, riskKey }: { score: number; riskKey: RiskKey }) {
   const R = 34;
   const C = 2 * Math.PI * R;
   const clamped = Math.min(100, Math.max(0, score));
-  const offset = C * (1 - clamped / 100);
+  const display = useCountUp(clamped);
+  const offset = C * (1 - display / 100);
   return (
     <div className="relative w-24 h-24 shrink-0">
       <svg viewBox="0 0 80 80" className="w-24 h-24 -rotate-90">
@@ -163,11 +186,11 @@ function ScoreGauge({ score, riskKey }: { score: number; riskKey: RiskKey }) {
           strokeLinecap="round"
           strokeDasharray={C}
           strokeDashoffset={offset}
-          className={`${RISK_TEXT[riskKey]} transition-[stroke-dashoffset] duration-700 ease-out`}
+          className={RISK_TEXT[riskKey]}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={`font-display text-2xl font-extrabold leading-none ${RISK_TEXT[riskKey]}`}>{clamped}</span>
+        <span className={`font-display text-2xl font-extrabold leading-none ${RISK_TEXT[riskKey]}`}>{display}</span>
         <span className="text-[10px] font-mono text-faint mt-0.5">/100</span>
       </div>
     </div>
@@ -739,7 +762,17 @@ export default function App() {
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="text-[11px] uppercase tracking-wider text-faint font-semibold">{meta.label}</div>
-                              <div className="text-sm font-mono truncate select-all">{e.text}</div>
+                              {/* Signature: il dato compare sotto una barra di redazione che si ritrae */}
+                              <div className="text-sm font-mono break-all">
+                                <span key={`${result.analysis_id}-${idx}`} className="redact rounded-sm select-all">
+                                  {e.text}
+                                  <span
+                                    className="redact-bar"
+                                    style={{ animationDelay: `${0.12 + idx * 0.07}s` }}
+                                    aria-hidden
+                                  />
+                                </span>
+                              </div>
                             </div>
                             <span
                               className="text-xs font-mono text-muted shrink-0 tabular-nums"
