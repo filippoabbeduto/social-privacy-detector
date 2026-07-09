@@ -365,6 +365,21 @@ export default function App() {
     }
   };
 
+  // Cambio modalità (Profilo/Immagine): azzera la vista risultati — un'analisi
+  // del profilo precedente non ha senso nella sezione immagini e viceversa.
+  const selectMode = (m: "profile" | "image") => {
+    if (m === mode) return;
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    setMode(m);
+    setResult(null);
+    setError(null);
+    setJobStatus(null);
+    setIsLoading(false);
+  };
+
   const handleClear = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = null;
@@ -406,7 +421,7 @@ export default function App() {
             <nav className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1">
               <button
                 type="button"
-                onClick={() => { setMode("profile"); setError(null); }}
+                onClick={() => selectMode("profile")}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
                   mode === "profile" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
                 }`}
@@ -415,7 +430,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => { setMode("image"); setError(null); }}
+                onClick={() => selectMode("image")}
                 className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
                   mode === "image" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
                 }`}
