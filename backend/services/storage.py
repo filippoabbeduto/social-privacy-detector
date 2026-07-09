@@ -20,6 +20,12 @@ logger = logging.getLogger("social-privacy-backend")
 
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
 
+# GDPR / storage limitation: i record (che contengono PII estratte dallo scraping)
+# NON sono conservati in modo permanente. A ogni analisi si imposta 'expires_at'
+# (epoch secondi): il TTL nativo di DynamoDB cancella automaticamente il record
+# scaduto. Finestra di conservazione configurabile via env (default 24 ore).
+DATA_RETENTION_HOURS = int(os.getenv("DATA_RETENTION_HOURS", "24"))
+
 
 def _floats_to_decimal(obj: Any) -> Any:
     """
@@ -87,13 +93,17 @@ class StorageService:
         Crea un nuovo job di analisi con stato PENDING.
         Chiamato dall'endpoint POST /api/analyze prima di accodare il lavoro.
         """
+        now = datetime.now(timezone.utc)
         record = {
             "analysis_id": analysis_id,
             "social_url": social_url,
             "scraped_content": scraped_content,
             "status": JOB_STATUS_PENDING,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            # Scadenza per il TTL di DynamoDB (auto-cancellazione — GDPR). Impostata
+            # alla creazione e mantenuta per tutta la vita del record.
+            "expires_at": int(now.timestamp()) + DATA_RETENTION_HOURS * 3600,
             # Risultati (popolati al completamento)
             "detected_pii": None,
             "social_engineering_report": None,
