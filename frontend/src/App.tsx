@@ -441,11 +441,19 @@ export default function App() {
                 </button>
               ) : (
                 <div className="space-y-2">
-                  <label htmlFor="scraped-content" className="block text-sm font-semibold">
-                    Biografia o testo dei post <span className="text-faint font-normal">(facoltativo)</span>
-                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowBio(false)}
+                    className="w-full flex items-center justify-between text-sm font-semibold hover:text-accent transition-colors"
+                  >
+                    <span>
+                      Biografia o testo dei post <span className="text-faint font-normal">(facoltativo)</span>
+                    </span>
+                    <ChevronDown className="w-4 h-4 rotate-180 text-faint" />
+                  </button>
                   <textarea
                     id="scraped-content"
+                    aria-label="Biografia o testo dei post"
                     rows={6}
                     value={scrapedContent}
                     onChange={(e) => {
