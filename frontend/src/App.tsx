@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Shield,
   Sun,
   Moon,
   Search,
@@ -367,8 +366,11 @@ export default function App() {
       <header className="sticky top-0 z-50 border-b border-line bg-bg/85 backdrop-blur">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="grid place-items-center w-9 h-9 rounded-xl bg-accent text-accentink shadow-soft">
-              <Shield className="w-5 h-5" />
+            {/* Marchio: due "righe redatte" (barre color inchiostro) — il simbolo
+                della censura/privacy. Niente icona generica, si adatta al tema. */}
+            <div className="flex flex-col gap-1.5 shrink-0" aria-hidden>
+              <span className="block h-2 w-7 rounded-full bg-ink" />
+              <span className="block h-2 w-4 rounded-full bg-ink" />
             </div>
             <div className="leading-tight">
               <div className="text-[10px] font-mono uppercase tracking-widest text-faint">
