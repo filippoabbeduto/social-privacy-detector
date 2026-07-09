@@ -7,7 +7,7 @@
 import os
 import json
 import logging
-from typing import List
+from typing import List, Tuple
 
 from models.schemas import PIIEntity, SocialEngineeringThreat
 
@@ -59,21 +59,27 @@ class ReportGeneratorService:
     # METODO PRINCIPALE
     # --------------------------------------------------------------------------
 
-    def generate_threats(self, pii_list: List[PIIEntity]) -> List[SocialEngineeringThreat]:
+    def generate_report(self, pii_list: List[PIIEntity]) -> Tuple[str, List[SocialEngineeringThreat]]:
         """
-        Genera l'analisi dei vettori di attacco secondo il provider configurato.
-        In modalità mock (sviluppo offline) usa sempre la logica deterministica.
-        In caso di errore di qualsiasi provider si ricade sempre sul mock, così la
-        pipeline non si interrompe mai.
+        Genera il report secondo il provider configurato, restituendo la coppia
+        (sintesi narrativa, lista dei vettori di attacco). In modalità mock usa la
+        logica deterministica; in caso di errore di qualsiasi provider si ricade
+        sempre sul mock, così la pipeline non si interrompe mai.
         """
         if AWS_MOCK:
-            return self._generate_mock(pii_list)
+            return self._mock_summary(pii_list), self._generate_mock(pii_list)
         if self.report_provider == "bedrock":
-            return self._generate_with_bedrock(pii_list) if self.bedrock_client else self._generate_mock(pii_list)
+            if self.bedrock_client:
+                return self._generate_with_bedrock(pii_list)
+            return self._mock_summary(pii_list), self._generate_mock(pii_list)
         if self.report_provider == "mock":
-            return self._generate_mock(pii_list)
+            return self._mock_summary(pii_list), self._generate_mock(pii_list)
         # Provider LLM esterno OpenAI-compatible (gemini / deepseek / openai / ...)
         return self._generate_with_llm(pii_list)
+
+    def generate_threats(self, pii_list: List[PIIEntity]) -> List[SocialEngineeringThreat]:
+        """Compatibilità: restituisce i soli vettori di attacco."""
+        return self.generate_report(pii_list)[1]
 
     # --------------------------------------------------------------------------
     # HELPER CONDIVISI (prompt e parsing), riusati da tutti i provider
@@ -86,49 +92,90 @@ class ReportGeneratorService:
         )
         return (
             "Sei un esperto di cybersecurity e social engineering. Analizza le seguenti "
-            "informazioni personali (PII) trovate su un profilo social pubblico e genera un report "
-            "strutturato sui possibili vettori di attacco di ingegneria sociale.\n\n"
+            "informazioni personali (PII) trovate su un profilo social pubblico.\n\n"
             f"PII rilevate:\n{pii_summary}\n\n"
-            "Per ogni vettore di attacco, fornisci:\n"
-            "1. Nome del vettore (threat_vector)\n"
-            "2. Gravità: LOW, MEDIUM o HIGH (severity)\n"
-            "3. Spiegazione dettagliata in italiano (explanation)\n\n"
-            "Rispondi SOLO con un JSON array valido, senza markdown o testo aggiuntivo."
+            "Produci due cose:\n"
+            "1. \"summary\": una sintesi in linguaggio naturale (3-5 frasi, in italiano) che "
+            "spieghi quali informazioni personali risultano MAGGIORMENTE esposte, quali PATTERN "
+            "ricorrenti emergono (es. routine, luoghi, ambito lavorativo, legami) e PERCHÉ questa "
+            "combinazione aumenta il rischio di social engineering.\n"
+            "2. \"threats\": la lista dei vettori di attacco; per ciascuno: threat_vector (nome), "
+            "severity (LOW, MEDIUM o HIGH), explanation (spiegazione dettagliata in italiano).\n\n"
+            "Rispondi SOLO con un oggetto JSON valido nella forma "
+            "{\"summary\": \"...\", \"threats\": [{\"threat_vector\":\"...\",\"severity\":\"...\",\"explanation\":\"...\"}]}, "
+            "senza markdown o testo aggiuntivo."
         )
 
-    def _parse_threats(self, raw_text: str, pii_list: List[PIIEntity]) -> List[SocialEngineeringThreat]:
+    def _parse_report(self, raw_text: str, pii_list: List[PIIEntity]) -> Tuple[str, List[SocialEngineeringThreat]]:
         """
-        Converte la risposta JSON del modello in oggetti SocialEngineeringThreat.
-        Rimuove eventuali recinti markdown (```json ... ```) che alcuni modelli
-        aggiungono nonostante la richiesta. In caso di parsing fallito → mock.
+        Converte la risposta JSON del modello nella coppia (sintesi, vettori).
+        Accetta l'oggetto {"summary": ..., "threats": [...]}. Rimuove eventuali
+        recinti markdown (```json ... ```). In caso di parsing fallito → mock.
         """
         text = (raw_text or "").strip()
         if text.startswith("```"):
             text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         try:
             data = json.loads(text)
+            summary = (data.get("summary") or "").strip()
             threats = [
                 SocialEngineeringThreat(
                     threat_vector=item.get("threat_vector", "Minaccia Sconosciuta"),
                     severity=item.get("severity", "MEDIUM"),
                     explanation=item.get("explanation", "Spiegazione non disponibile."),
                 )
-                for item in data
+                for item in (data.get("threats") or [])
             ]
-            return threats if threats else self._generate_mock(pii_list)
+            if not threats:
+                threats = self._generate_mock(pii_list)
+            if not summary:
+                summary = self._mock_summary(pii_list)
+            return summary, threats
         except Exception as e:
             logger.error(f"[Report] Parsing risposta LLM fallito: {e}. Fallback su mock.")
-            return self._generate_mock(pii_list)
+            return self._mock_summary(pii_list), self._generate_mock(pii_list)
 
-    def _generate_with_llm(self, pii_list: List[PIIEntity]) -> List[SocialEngineeringThreat]:
+    def _mock_summary(self, pii_list: List[PIIEntity]) -> str:
         """
-        Genera il report tramite un'API LLM esterna OpenAI-compatible (default
-        Google Gemini). Usato al posto di Bedrock quando la quota AWS non è
-        disponibile; il codice Bedrock resta come alternativa via REPORT_PROVIDER.
+        Sintesi narrativa deterministica (usata in mock e come fallback). Compone
+        una frase in linguaggio naturale a partire dai tipi di PII presenti.
+        """
+        if not pii_list:
+            return (
+                "Il testo analizzato non espone dati personali identificabili in chiaro: "
+                "l'esposizione pubblica risulta minima. Si consiglia comunque una verifica "
+                "periodica della propria impronta digitale."
+            )
+        etichette = {
+            "NAME": "il nome", "EMAIL": "l'indirizzo email", "PHONE": "il numero di telefono",
+            "PHONE_NUMBER": "il numero di telefono", "LOCATION": "i luoghi frequentati",
+            "ADDRESS": "l'indirizzo", "DATE_OF_BIRTH": "la data di nascita",
+            "FISCAL_CODE": "il codice fiscale", "IBAN": "l'IBAN",
+            "ORGANIZATION": "l'ambito lavorativo/accademico", "USERNAME": "gli username",
+            "URL": "i link personali", "DATE": "date personali",
+        }
+        tipi = []
+        for p in pii_list:
+            e = etichette.get(p.type)
+            if e and e not in tipi:
+                tipi.append(e)
+        elenco = ", ".join(tipi[:-1]) + (" e " + tipi[-1] if len(tipi) > 1 else tipi[0])
+        return (
+            f"Il profilo espone {elenco}. La compresenza di più dati identificativi consente "
+            "di correlare le informazioni e ricostruire un profilo dettagliato dell'utente, "
+            "aumentando il rischio di messaggi fraudolenti personalizzati (phishing, smishing) "
+            "e di tentativi di impersonificazione basati sul contesto."
+        )
+
+    def _generate_with_llm(self, pii_list: List[PIIEntity]) -> Tuple[str, List[SocialEngineeringThreat]]:
+        """
+        Genera il report (sintesi + vettori) tramite un'API LLM esterna
+        OpenAI-compatible (default Google Gemini). Usato al posto di Bedrock quando
+        la quota AWS non è disponibile; Bedrock resta alternativa via REPORT_PROVIDER.
         """
         if not self.llm_api_key:
             logger.warning("[LLM Report] Chiave API mancante (GEMINI_API_KEY/LLM_API_KEY). Fallback su mock.")
-            return self._generate_mock(pii_list)
+            return self._mock_summary(pii_list), self._generate_mock(pii_list)
 
         logger.info(f"[LLM Report] Provider={self.report_provider} modello={self.llm_model}")
         try:
@@ -142,10 +189,10 @@ class ReportGeneratorService:
                 # troncava (JSON incompleto). 4096 dà margine sufficiente.
                 max_tokens=4096,
             )
-            return self._parse_threats(resp.choices[0].message.content, pii_list)
+            return self._parse_report(resp.choices[0].message.content, pii_list)
         except Exception as e:
             logger.error(f"[LLM Report] Errore provider {self.report_provider}: {e}. Fallback su mock.")
-            return self._generate_mock(pii_list)
+            return self._mock_summary(pii_list), self._generate_mock(pii_list)
 
     # --------------------------------------------------------------------------
     # IMPLEMENTAZIONE MOCK: Generazione Deterministica
@@ -264,7 +311,7 @@ class ReportGeneratorService:
     # IMPLEMENTAZIONE REALE: Amazon Bedrock (Claude)
     # --------------------------------------------------------------------------
 
-    def _generate_with_bedrock(self, pii_list: List[PIIEntity]) -> List[SocialEngineeringThreat]:
+    def _generate_with_bedrock(self, pii_list: List[PIIEntity]) -> Tuple[str, List[SocialEngineeringThreat]]:
         """
         Invoca Claude su Amazon Bedrock per generare l'analisi delle minacce.
         """
@@ -295,9 +342,9 @@ class ReportGeneratorService:
             )
 
             response_body = json.loads(response["body"].read())
-            content_text = response_body.get("content", [{}])[0].get("text", "[]")
-            return self._parse_threats(content_text, pii_list)
+            content_text = response_body.get("content", [{}])[0].get("text", "{}")
+            return self._parse_report(content_text, pii_list)
 
         except Exception as e:
             logger.error(f"Errore Bedrock Claude: {e}. Fallback su mock.")
-            return self._generate_mock(pii_list)
+            return self._mock_summary(pii_list), self._generate_mock(pii_list)

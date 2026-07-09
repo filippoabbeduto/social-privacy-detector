@@ -27,6 +27,7 @@ import {
   Tag,
   Cpu,
   ScanText,
+  Sparkles,
 } from "lucide-react";
 
 // ─── Profili di esempio: popolano il form per provare i diversi livelli di rischio ───
@@ -90,6 +91,7 @@ interface AnalysisResult {
   social_url: string;
   status: string;
   detected_pii?: PIIEntity[];
+  narrative_summary?: string;
   social_engineering_report?: SocialEngineeringThreat[];
   risk_assessment?: RiskAssessment;
   error?: string;
@@ -632,6 +634,17 @@ export default function App() {
                     Profilo analizzato: <span className="text-muted">{result.social_url}</span>
                   </div>
                 </div>
+
+                {/* Sintesi narrativa generata dall'AI (quali dati esposti, pattern, perché) */}
+                {result.narrative_summary && (
+                  <div className="rise rounded-2xl border border-line bg-surface shadow-soft p-6" style={{ animationDelay: "0.03s" }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sparkles className="w-4 h-4 text-accent" />
+                      <h3 className="font-display font-bold">Sintesi dell'esposizione</h3>
+                    </div>
+                    <p className="text-sm text-muted leading-relaxed">{result.narrative_summary}</p>
+                  </div>
+                )}
 
                 {/* Dati personali rilevati — tabella pulita in stile reference */}
                 <div className="rise rounded-2xl border border-line bg-surface shadow-soft p-6" style={{ animationDelay: "0.06s" }}>

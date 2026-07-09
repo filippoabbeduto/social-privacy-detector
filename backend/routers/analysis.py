@@ -151,8 +151,8 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
                 seen.add(key)
                 detected_piis.append(entity)
 
-        # Step 4: Generazione report minacce (su dati deduplicati)
-        social_threats = report_service.generate_threats(detected_piis)
+        # Step 4: Generazione report (sintesi narrativa + vettori) su dati deduplicati
+        narrative_summary, social_threats = report_service.generate_report(detected_piis)
 
         # Step 5: Calcolo livello di rischio tramite feature engineering (su dati RAW)
         risk_level, risk_explanation, risk_score, risk_motivations = build_risk_assessment(raw_piis)
@@ -160,6 +160,7 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
         # Step 6: Salvataggio risultati → COMPLETED
         results = {
             "detected_pii": [p.model_dump() for p in detected_piis],
+            "narrative_summary": narrative_summary,
             "social_engineering_report": [t.model_dump() for t in social_threats],
             "risk_assessment": {
                 "risk_level": risk_level,
@@ -347,6 +348,7 @@ def get_analysis(analysis_id: str):
         social_url=record["social_url"],
         status=record["status"],
         detected_pii=record.get("detected_pii"),
+        narrative_summary=record.get("narrative_summary"),
         social_engineering_report=record.get("social_engineering_report"),
         risk_assessment=record.get("risk_assessment"),
         error=record.get("error"),
