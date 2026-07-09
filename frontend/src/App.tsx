@@ -378,33 +378,34 @@ export default function App() {
             </div>
           </div>
 
-          {/* Tab modalità di analisi: Profilo / Immagine */}
-          <nav className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1">
-            <button
-              type="button"
-              onClick={() => { setMode("profile"); setError(null); }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                mode === "profile" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
-              }`}
-            >
-              Profilo
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMode("image"); setError(null); }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                mode === "image" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
-              }`}
-            >
-              Immagine
-            </button>
-          </nav>
-
+          {/* Gruppo destro: stato AWS, tab modalità (Profilo/Immagine), tema */}
           <div className="flex items-center gap-2.5">
-            <span className="hidden sm:flex items-center gap-1.5 text-xs text-muted border border-line rounded-full px-3 py-1.5 bg-surface">
+            <span className="hidden md:flex items-center gap-1.5 text-xs text-muted border border-line rounded-full px-3 py-1.5 bg-surface">
               <span className="w-1.5 h-1.5 rounded-full bg-low" />
               AWS · us-east-1
             </span>
+
+            <nav className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1">
+              <button
+                type="button"
+                onClick={() => { setMode("profile"); setError(null); }}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                  mode === "profile" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
+                }`}
+              >
+                Profilo
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMode("image"); setError(null); }}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                  mode === "image" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
+                }`}
+              >
+                Immagine
+              </button>
+            </nav>
+
             <button
               type="button"
               onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
