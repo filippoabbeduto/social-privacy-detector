@@ -240,6 +240,9 @@ export default function App() {
   // tenere il form pulito e focalizzato sull'unico campo obbligatorio (l'URL).
   const [showBio, setShowBio] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
+  // Modalità di analisi selezionabile dalla navbar: "profile" (URL + bio) oppure
+  // "image" (upload di una foto, controllo pre-pubblicazione via OCR Textract).
+  const [mode, setMode] = useState<"profile" | "image">("profile");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => () => {
@@ -375,6 +378,28 @@ export default function App() {
             </div>
           </div>
 
+          {/* Tab modalità di analisi: Profilo / Immagine */}
+          <nav className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1">
+            <button
+              type="button"
+              onClick={() => { setMode("profile"); setError(null); }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                mode === "profile" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
+              }`}
+            >
+              Profilo
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode("image"); setError(null); }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                mode === "image" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
+              }`}
+            >
+              Immagine
+            </button>
+          </nav>
+
           <div className="flex items-center gap-2.5">
             <span className="hidden sm:flex items-center gap-1.5 text-xs text-muted border border-line rounded-full px-3 py-1.5 bg-surface">
               <span className="w-1.5 h-1.5 rounded-full bg-low" />
@@ -395,18 +420,34 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-5 sm:px-8 py-8 sm:py-10">
         {/* ── Intro ─────────────────────────────────────────────────────────── */}
         <section className="mb-8 max-w-2xl">
-          <h2 className="font-display text-3xl sm:text-[38px] leading-[1.1] font-extrabold tracking-tight">
-            Quanto è esposto il tuo profilo social?
-          </h2>
-          <p className="text-muted text-sm sm:text-base leading-relaxed mt-3">
-            Da una biografia e pochi post, un estraneo può ricostruire chi sei, dove vivi e come contattarti.
-            Individua i dati personali esposti, i possibili attacchi e un punteggio di rischio.
-          </p>
+          {mode === "profile" ? (
+            <>
+              <h2 className="font-display text-3xl sm:text-[38px] leading-[1.1] font-extrabold tracking-tight">
+                Quanto è esposto il tuo profilo social?
+              </h2>
+              <p className="text-muted text-sm sm:text-base leading-relaxed mt-3">
+                Da una biografia e pochi post, un estraneo può ricostruire chi sei, dove vivi e come
+                contattarti. Individua i dati personali esposti, i possibili attacchi e un punteggio di rischio.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="font-display text-3xl sm:text-[38px] leading-[1.1] font-extrabold tracking-tight">
+                Un'immagine può rivelare più di quanto pensi.
+              </h2>
+              <p className="text-muted text-sm sm:text-base leading-relaxed mt-3">
+                Prima di pubblicare una foto — uno screenshot, un documento, un biglietto — controlla il testo
+                visibile: l'OCR lo estrae e ne analizza l'esposizione di dati personali.
+              </p>
+            </>
+          )}
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* ── Colonna sinistra: input ─────────────────────────────────────── */}
+          {/* ── Colonna sinistra: input (dipende dalla modalità) ────────────── */}
           <div className="lg:col-span-5 space-y-5">
+            {mode === "profile" && (
+            <div className="space-y-5">
             <form onSubmit={handleAnalyze} className="rounded-2xl border border-line bg-surface shadow-soft p-6 space-y-5">
               <div className="space-y-2">
                 <label htmlFor="social-url" className="block text-sm font-semibold">
@@ -496,38 +537,6 @@ export default function App() {
               </div>
             </form>
 
-            {/* Analisi da immagine (OCR Amazon Textract) */}
-            <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
-              <span className="block text-[11px] uppercase tracking-wider text-muted font-semibold mb-1">
-                Oppure analizza un'immagine
-              </span>
-              <p className="text-sm text-muted mb-3">
-                Uno screenshot o la foto di un documento: il testo visibile viene estratto con OCR (Amazon Textract) e
-                analizzato allo stesso modo.
-              </p>
-              <label
-                className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-sm font-semibold transition-colors ${
-                  isLoading
-                    ? "border-line text-faint cursor-not-allowed"
-                    : "border-line text-muted hover:text-ink hover:border-accent hover:bg-surface2 cursor-pointer"
-                }`}
-              >
-                <ScanText className="w-4 h-4" />
-                Carica immagine
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  disabled={isLoading}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleImageUpload(f);
-                    e.target.value = ""; // consente di ricaricare lo stesso file
-                  }}
-                />
-              </label>
-            </div>
-
             {/* Profili di esempio (collassabili, chiusi di default) */}
             <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
               <button
@@ -556,6 +565,41 @@ export default function App() {
                 ))}
               </div>
             </div>
+
+            </div>
+            )}
+
+            {mode === "image" && (
+              <div className="rounded-2xl border border-line bg-surface shadow-soft p-6 space-y-3">
+                <h2 className="font-display text-lg font-bold">Analizza un'immagine</h2>
+                <p className="text-sm text-muted">
+                  Carica uno screenshot o la foto di un documento: il testo visibile viene estratto con OCR
+                  (Amazon Textract) e analizzato per rilevare eventuali dati personali esposti.
+                </p>
+                <label
+                  className={`flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-10 text-sm font-semibold transition-colors ${
+                    isLoading
+                      ? "border-line text-faint cursor-not-allowed"
+                      : "border-line text-muted hover:text-ink hover:border-accent hover:bg-surface2 cursor-pointer"
+                  }`}
+                >
+                  <ScanText className="w-6 h-6" />
+                  Carica immagine
+                  <span className="text-xs font-normal text-faint">PNG o JPEG · max 8 MB</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={isLoading}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImageUpload(f);
+                      e.target.value = ""; // consente di ricaricare lo stesso file
+                    }}
+                  />
+                </label>
+              </div>
+            )}
 
             {/* Motore (crediti onesti) */}
             <div className="rounded-2xl border border-line bg-surface shadow-soft p-6 text-sm">
@@ -748,8 +792,9 @@ export default function App() {
                   </div>
                   <h3 className="font-display font-bold">Nessuna analisi ancora</h3>
                   <p className="text-sm text-muted max-w-sm mx-auto mt-1.5 leading-relaxed">
-                    Inserisci un profilo a sinistra — o scegli un profilo di esempio — e avvia l'analisi per vedere qui il
-                    verdetto, i dati esposti e i possibili attacchi.
+                    {mode === "profile"
+                      ? "Inserisci un profilo a sinistra — o scegli un profilo di esempio — e avvia l'analisi per vedere qui il verdetto, i dati esposti e i possibili attacchi."
+                      : "Carica un'immagine a sinistra: qui vedrai il verdetto, i dati personali estratti dal testo visibile e i possibili attacchi."}
                   </p>
                 </div>
               )
