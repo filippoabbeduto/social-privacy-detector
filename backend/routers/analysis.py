@@ -153,7 +153,7 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
       2. Scraping del profilo (Apify / mock)
       3. Estrazione PII (Comprehend / Regex)
       4. Deduplicazione PII per il report
-      5. Generazione report minacce (Bedrock / mock)
+      5. Generazione report minacce (Gemini / mock)
       6. Calcolo risk score (feature engineering)
       7. Salvataggio risultati → COMPLETED
     """

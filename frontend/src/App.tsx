@@ -256,9 +256,24 @@ export default function App() {
   const [mode, setMode] = useState<"profile" | "image">("profile");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => () => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-  }, []);
+  // Ferma il polling in corso. Centralizzato perché serve a più handler
+  // (cambio modalità, pulisci, esito COMPLETED/FAILED, smontaggio del componente).
+  const stopPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  };
+  // Riporta la vista risultati allo stato iniziale (nessun esito, nessun errore).
+  const resetOutcome = () => {
+    setResult(null);
+    setError(null);
+    setJobStatus(null);
+    setIsLoading(false);
+  };
+
+  // Allo smontaggio, interrompe un eventuale polling attivo.
+  useEffect(() => stopPolling, []);
 
   const applyTemplate = (index: number) => {
     setSocialUrl(DEMO_PROFILES[index].url);
@@ -269,7 +284,7 @@ export default function App() {
   };
 
   const startPolling = (analysisId: string) => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
+    stopPolling();
     pollingRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/analysis/${analysisId}`);
@@ -277,13 +292,11 @@ export default function App() {
         const data: AnalysisResult = await res.json();
         setJobStatus(data.status);
         if (data.status === "COMPLETED") {
-          clearInterval(pollingRef.current!);
-          pollingRef.current = null;
+          stopPolling();
           setResult(data);
           setIsLoading(false);
         } else if (data.status === "FAILED") {
-          clearInterval(pollingRef.current!);
-          pollingRef.current = null;
+          stopPolling();
           setError(data.error || "Analisi non riuscita.");
           setIsLoading(false);
         }
@@ -358,19 +371,13 @@ export default function App() {
   // del profilo precedente non ha senso nella sezione immagini e viceversa.
   const selectMode = (m: "profile" | "image") => {
     if (m === mode) return;
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
+    stopPolling();
     setMode(m);
-    setResult(null);
-    setError(null);
-    setJobStatus(null);
-    setIsLoading(false);
+    resetOutcome();
   };
 
-  // Scarica l'ultimo report come file di testo leggibile (nessun login: l'utente
-  // conserva in locale i report che ritiene utili). Generazione client-side.
+  // Scarica l'ultimo report come PDF (nessun login: l'utente conserva in locale
+  // i report che ritiene utili). Generazione interamente client-side.
   const downloadReport = async () => {
     if (!result || !result.risk_assessment) return;
     // jsPDF caricato solo qui (dynamic import): non pesa sul bundle iniziale.
@@ -459,17 +466,13 @@ export default function App() {
   };
 
   const handleClear = () => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    pollingRef.current = null;
+    stopPolling();
     setSocialUrl("");
     setScrapedContent("");
-    setError(null);
-    setResult(null);
-    setJobStatus(null);
     setActiveTemplate(null);
     setShowBio(false);
     setShowExamples(false);
-    setIsLoading(false);
+    resetOutcome();
   };
 
   const risk = result?.risk_assessment ? riskInfo(result.risk_assessment.risk_level) : null;
@@ -725,7 +728,7 @@ export default function App() {
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt>Report minacce</dt>
-                  <dd className="text-ink font-mono text-xs">Amazon Bedrock · Claude</dd>
+                  <dd className="text-ink font-mono text-xs">Google Gemini</dd>
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt>Persistenza</dt>

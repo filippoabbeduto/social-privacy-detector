@@ -1,19 +1,19 @@
-# 🔒 Social Privacy Detector
+# Social Privacy Detector
 
 **Progetto per l'esame di Sistemi Distribuiti e Cloud Computing (SDCC) — a.a. 2025/26**
 **Università della Calabria** | Studente: Filippo Abbeduto | Matricola: 276572
 
 ---
 
-## 📋 Descrizione
+## Descrizione
 
 Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'analisi dell'esposizione pubblica di dati personali (PII) sui social network, con valutazione dei rischi di privacy e social engineering.
 
-## 🏗️ Architettura
+## Architettura
 
 ```
                     ┌──────────────────────────────────┐
-                    │   Nginx Reverse Proxy (Porta 80)  │
+                    │   Nginx Reverse Proxy (80/443)    │
                     └─────────┬───────────┬────────────┘
                               │           │
                     ┌─────────▼──┐  ┌─────▼──────────┐
@@ -23,23 +23,24 @@ Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'ana
                                             │ Boto3 SDK
                     ┌───────────────────────▼────────────────────┐
                     │            AWS Managed Services             │
-                    │  Comprehend │ Textract │ Bedrock │ DynamoDB │
+                    │  Comprehend │ Textract │ DynamoDB │ S3   │
                     └────────────────────────────────────────────┘
+              report: Google Gemini (LLM esterno, via HTTPS)
 ```
 
 | Layer | Tecnologia |
 |-------|-----------|
-| Frontend | React 18 + TypeScript + Vite + TailwindCSS |
+| Frontend | React 19 + TypeScript + Vite + TailwindCSS |
 | Backend | FastAPI (Python 3.12) + Uvicorn |
 | Container | Docker + Docker Compose |
 | CI/CD | GitHub Actions → Amazon ECR → EC2 |
-| Hosting | Amazon EC2 (t2.micro) |
+| Hosting | Amazon EC2 (t3.micro) + Nginx (TLS su 443) |
 | PII Detection | Amazon Comprehend + Textract (mock locale via Regex) |
-| AI Report | Amazon Bedrock / Claude (mock locale deterministico) |
+| AI Report | Google Gemini (gemini-2.5-flash) — LLM esterno; Bedrock alternativa switchable; mock locale deterministico |
 | Database | Amazon DynamoDB (mock locale in-memory) |
 | Storage | Amazon S3 (mock locale in-memory) |
 
-## 🚀 Avvio Locale (Docker)
+## Avvio Locale (Docker)
 
 ```bash
 # Clona il repository
@@ -55,13 +56,13 @@ docker compose up --build -d
 # Health:    http://localhost/api/health
 ```
 
-## 🛑 Stop
+## Stop
 
 ```bash
 docker compose down
 ```
 
-## 📁 Struttura Progetto
+## Struttura Progetto
 
 ```
 social-privacy-detector/
@@ -83,12 +84,14 @@ social-privacy-detector/
 │   ├── models/
 │   │   └── schemas.py          # Modelli Pydantic (validazione I/O)
 │   ├── routers/
-│   │   └── analysis.py         # Endpoint /api/analyze, /api/analyses
-│   └── services/
-│       ├── pii_detector.py     # PII Detection (Comprehend/Regex)
-│       ├── report_generator.py # Report AI (Bedrock Claude/Mock)
-│       ├── scraper.py          # Scraping social (Apify/Mock)
-│       └── storage.py          # Persistenza (DynamoDB+S3/In-Memory)
+│   │   └── analysis.py         # Endpoint REST (/api/analyze, /api/analyze-image, /api/analysis/{id}) + worker async
+│   ├── services/
+│   │   ├── pii_detector.py     # Rilevamento PII (Comprehend/Regex) + OCR (Textract)
+│   │   ├── report_generator.py # Report AI + prompt engineering
+│   │   ├── risk_scorer.py      # Risk scoring (feature engineering)
+│   │   ├── scraper.py          # Scraping social (Apify)
+│   │   └── storage.py          # Persistenza (DynamoDB+S3 / in-memory mock)
+│   └── tests/                  # Suite pytest (15 test)
 ├── docker-compose.yml          # Orchestrazione 3 container
 ├── nginx.conf                  # Reverse proxy principale
 ├── .env.example

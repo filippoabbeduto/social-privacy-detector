@@ -227,9 +227,12 @@ class StorageService:
             logger.info(f"[AWS DynamoDB] Job {analysis_id} salvato (status: {record.get('status')})")
             return True
         except Exception as e:
-            logger.error(f"Errore DynamoDB put_item: {e}")
-            with self._mock_lock:
-                self._mock_store[analysis_id] = record
+            # In produzione lo store è DynamoDB. NON ricadiamo sul dizionario
+            # in-memory: darebbe una falsa durabilità (il dato si perderebbe al
+            # riavvio e non sarebbe condiviso tra eventuali repliche), mascherando
+            # un guasto reale dietro un apparente successo. Segnaliamo l'errore e
+            # ritorniamo False, così il fallimento resta visibile.
+            logger.error(f"[AWS DynamoDB] put_item FALLITO per {analysis_id}: {e}. Risultato NON persistito.")
             return False
 
     def _get_record(self, analysis_id: str) -> Optional[Dict[str, Any]]:
@@ -242,6 +245,7 @@ class StorageService:
             response = self.dynamodb_table.get_item(Key={"analysis_id": analysis_id})
             return response.get("Item")
         except Exception as e:
-            logger.error(f"Errore DynamoDB get_item: {e}")
-            with self._mock_lock:
-                return self._mock_store.get(analysis_id)
+            # Come sopra: in produzione non si consulta il mock (sarebbe vuoto/stantìo).
+            # Si segnala l'errore e si ritorna None, senza fingere un dato che non c'è.
+            logger.error(f"[AWS DynamoDB] get_item FALLITO per {analysis_id}: {e}.")
+            return None

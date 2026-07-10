@@ -1,7 +1,8 @@
 # ==============================================================================
 # REPORT GENERATOR SERVICE - Generazione Report AI (SDCC)
-# Simula Amazon Bedrock Runtime (Claude) in locale.
-# In produzione, invoca bedrock_runtime.invoke_model() via Boto3.
+# Provider switchable via REPORT_PROVIDER: "gemini" (default — Google Gemini via
+# endpoint OpenAI-compatible), "bedrock" (Amazon Bedrock/Claude, alternativa
+# mantenuta per sviluppo futuro) o "mock" (deterministico). In AWS_MOCK gira il mock.
 # ==============================================================================
 
 import os
@@ -21,7 +22,8 @@ class ReportGeneratorService:
     Genera report di social engineering basati sulle PII rilevate.
 
     Modalita MOCK: logica deterministica basata sui tipi di PII trovati.
-    Modalita PRODUZIONE: invoca Claude su Amazon Bedrock per report in linguaggio naturale.
+    Modalita PRODUZIONE: invoca il provider LLM configurato (default Google Gemini;
+    Amazon Bedrock/Claude come alternativa) per il report in linguaggio naturale.
     """
 
     def __init__(self):

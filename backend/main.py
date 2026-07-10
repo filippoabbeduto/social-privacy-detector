@@ -82,7 +82,7 @@ def health_check():
         "services": {
             "pii_detection": "Amazon Comprehend (Mock)" if AWS_MOCK else "Amazon Comprehend (Boto3)",
             "ocr": "Amazon Textract (Mock)" if AWS_MOCK else "Amazon Textract (Boto3)",
-            "ai_report": "Amazon Bedrock Claude (Mock)" if AWS_MOCK else "Amazon Bedrock Claude (Boto3)",
+            "ai_report": "Report deterministico (Mock)" if AWS_MOCK else "Google Gemini (gemini-2.5-flash)",
             "database": "In-Memory (Mock)" if AWS_MOCK else "Amazon DynamoDB (Boto3)",
             "storage": "In-Memory (Mock)" if AWS_MOCK else "Amazon S3 (Boto3)",
         }
