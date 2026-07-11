@@ -38,6 +38,15 @@ class PIIEntity(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# IMAGE LABEL MODEL (Output di Amazon Rekognition DetectLabels)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class ImageLabel(BaseModel):
+    name: str = Field(..., description="Etichetta visiva rilevata nell'immagine (es. Beach, Car, Person)")
+    confidence: float = Field(..., description="Confidenza del rilevamento (0-100)")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # SOCIAL ENGINEERING THREAT MODEL (Output del report LLM — Gemini/mock)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -77,6 +86,7 @@ class AnalysisReportResponse(BaseModel):
     social_url: str = Field(..., description="URL originale inoltrato per l'analisi")
     status: str = Field(..., description="Stato dell'elaborazione (PENDING, PROCESSING, COMPLETED, FAILED)")
     detected_pii: Optional[List[PIIEntity]] = Field(None, description="Elenco delle PII estratte (disponibile solo quando status=COMPLETED)")
+    image_labels: Optional[List[ImageLabel]] = Field(None, description="Etichette visive rilevate nelle immagini da Amazon Rekognition (esposizione visiva; disponibile quando status=COMPLETED)")
     narrative_summary: Optional[str] = Field(None, description="Sintesi in linguaggio naturale dell'esposizione: quali dati sono più esposti, pattern ricorrenti e perché aumentano il rischio (disponibile quando status=COMPLETED)")
     social_engineering_report: Optional[List[SocialEngineeringThreat]] = Field(None, description="Report dei vettori di minaccia (disponibile solo quando status=COMPLETED)")
     risk_assessment: Optional[RiskAssessment] = Field(None, description="Valutazione complessiva del rischio (disponibile solo quando status=COMPLETED)")

@@ -15,6 +15,11 @@ logger = logging.getLogger("social-privacy-backend")
 
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
 
+# Interruttore per l'analisi visiva (Amazon Rekognition DetectLabels). Permette di
+# disattivarla senza toccare il codice (es. contenimento costi) mettendo la
+# variabile a "false". Attiva di default; ininfluente in AWS_MOCK (labels simulate).
+ENABLE_REKOGNITION = os.getenv("ENABLE_REKOGNITION", "true").lower() == "true"
+
 
 class PIIDetectorService:
     """
@@ -32,6 +37,7 @@ class PIIDetectorService:
     def __init__(self):
         self.comprehend_client = None
         self.textract_client = None
+        self.rekognition_client = None
 
         if not AWS_MOCK:
             try:
@@ -39,7 +45,11 @@ class PIIDetectorService:
                 region = os.getenv("AWS_DEFAULT_REGION", "eu-west-1")
                 self.comprehend_client = boto3.client("comprehend", region_name=region)
                 self.textract_client = boto3.client("textract", region_name=region)
-                logger.info("⚡ PIIDetectorService: Client AWS Comprehend e Textract inizializzati.")
+                # Rekognition: analisi visiva (oggetti/scene/luoghi) delle immagini,
+                # complementare all'OCR di Textract. Inizializzato solo se abilitato.
+                if ENABLE_REKOGNITION:
+                    self.rekognition_client = boto3.client("rekognition", region_name=region)
+                logger.info("⚡ PIIDetectorService: Client AWS Comprehend, Textract e Rekognition inizializzati.")
             except Exception as e:
                 logger.error(f"PIIDetectorService: Impossibile inizializzare Boto3. Errore: {e}")
 
@@ -236,3 +246,38 @@ class PIIDetectorService:
         except Exception as e:
             logger.error(f"Errore Textract: {e}")
             return ""
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # VISIONE: Amazon Rekognition DetectLabels (analisi semantica delle immagini)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def detect_image_labels(self, image_bytes: bytes) -> List[dict]:
+        """
+        Rileva oggetti, scene e luoghi in un'immagine tramite Amazon Rekognition
+        (DetectLabels). Complementare all'OCR: cattura ciò che una foto espone
+        ANCHE senza testo (spiaggia, monumento, veicolo, contesto, ecc.), utile a
+        stimare l'esposizione visiva (routine, geografia). Restituisce una lista di
+        {"name", "confidence"}. In mock mode restituisce etichette di esempio.
+        """
+        if AWS_MOCK or not self.rekognition_client:
+            logger.info("[MOCK Rekognition] Simulazione DetectLabels")
+            return [
+                {"name": "Beach", "confidence": 98.4},
+                {"name": "Person", "confidence": 96.1},
+                {"name": "Car", "confidence": 88.7},
+                {"name": "License Plate", "confidence": 81.2},
+            ]
+
+        try:
+            response = self.rekognition_client.detect_labels(
+                Image={"Bytes": image_bytes},
+                MaxLabels=15,
+                MinConfidence=75,   # scarta le etichette poco affidabili
+            )
+            return [
+                {"name": lbl["Name"], "confidence": round(lbl.get("Confidence", 0.0), 1)}
+                for lbl in response.get("Labels", [])
+            ]
+        except Exception as e:
+            logger.error(f"Errore Rekognition: {e}")
+            return []

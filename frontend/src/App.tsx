@@ -30,6 +30,7 @@ import {
   Cpu,
   ScanText,
   Sparkles,
+  Eye,
 } from "lucide-react";
 
 // ─── Profili di esempio: popolano il form per provare i diversi livelli di rischio ───
@@ -76,11 +77,16 @@ interface RiskAssessment {
   score: number;
   motivations: string[];
 }
+interface ImageLabel {
+  name: string;
+  confidence: number;
+}
 interface AnalysisResult {
   analysis_id: string;
   social_url: string;
   status: string;
   detected_pii?: PIIEntity[];
+  image_labels?: ImageLabel[];
   narrative_summary?: string;
   social_engineering_report?: SocialEngineeringThreat[];
   risk_assessment?: RiskAssessment;
@@ -447,6 +453,17 @@ export default function App() {
       );
     } else {
       write("Nessun dato personale leggibile.", 10, false, [110, 110, 110]);
+    }
+
+    const labels = result.image_labels || [];
+    if (labels.length) {
+      heading(`Esposizione visiva (${labels.length})`);
+      write(
+        labels.map((l) => `${l.name} (${l.confidence.toFixed(0)}%)`).join(",  "),
+        10,
+        false,
+        [55, 55, 55]
+      );
     }
 
     heading(`Vettori di ingegneria sociale (${threats.length})`);
@@ -944,6 +961,29 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                {/* Esposizione visiva — etichette Amazon Rekognition dalle immagini */}
+                {result.image_labels && result.image_labels.length > 0 && (
+                  <div className="rise rounded-2xl border border-line bg-surface shadow-soft p-6" style={{ animationDelay: "0.09s" }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Eye className="w-4 h-4 text-accent" />
+                      <h3 className="font-display font-bold">Esposizione visiva</h3>
+                    </div>
+                    <p className="text-sm text-muted mb-4">Contesto dedotto dalle immagini (luoghi, oggetti, scene) tramite riconoscimento visivo.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {result.image_labels.map((l, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface2 px-3 py-1 text-sm"
+                          title={`Confidenza ${l.confidence.toFixed(0)}%`}
+                        >
+                          {l.name}
+                          <span className="text-xs font-mono text-faint tabular-nums">{l.confidence.toFixed(0)}%</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Vettori d'attacco */}
                 {threats.length > 0 && (

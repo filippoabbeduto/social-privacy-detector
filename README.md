@@ -23,7 +23,7 @@ Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'ana
                                             │ Boto3 SDK
                     ┌───────────────────────▼────────────────────┐
                     │            AWS Managed Services             │
-                    │  Comprehend │ Textract │ DynamoDB │ S3   │
+                    │ Comprehend │ Textract │ Rekognition │ DDB │ S3 │
                     └────────────────────────────────────────────┘
               report: Google Gemini (LLM esterno, via HTTPS)
 ```
@@ -36,6 +36,7 @@ Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'ana
 | CI/CD | GitHub Actions → Amazon ECR → EC2 |
 | Hosting | Amazon EC2 (t3.micro) + Nginx (TLS su 443) |
 | PII Detection | Amazon Comprehend + Textract (mock locale via Regex) |
+| Analisi visiva | Amazon Rekognition (DetectLabels) — esposizione dalle immagini |
 | AI Report | Google Gemini (gemini-2.5-flash) — LLM esterno; mock locale deterministico |
 | Database | Amazon DynamoDB (mock locale in-memory) |
 | Storage | Amazon S3 (mock locale in-memory) |
@@ -86,7 +87,7 @@ social-privacy-detector/
 │   ├── routers/
 │   │   └── analysis.py         # Endpoint REST (/api/analyze, /api/analyze-image, /api/analysis/{id}) + worker async
 │   ├── services/
-│   │   ├── pii_detector.py     # Rilevamento PII (Comprehend/Regex) + OCR (Textract)
+│   │   ├── pii_detector.py     # PII (Comprehend/Regex) + OCR (Textract) + visione (Rekognition)
 │   │   ├── report_generator.py # Report AI + prompt engineering
 │   │   ├── risk_scorer.py      # Risk scoring (feature engineering)
 │   │   ├── scraper.py          # Scraping social (Apify)

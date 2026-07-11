@@ -19,7 +19,7 @@ import socket
 import logging
 import ipaddress
 import threading
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -120,15 +120,17 @@ def _fetch_image_safely(url: str) -> Optional[bytes]:
         return None
 
 
-def _ocr_post_images(image_urls: List[str]) -> List[str]:
+def _process_post_images(image_urls: List[str]) -> Tuple[List[str], List[dict]]:
     """
     Scarica le prime MAX_POST_IMAGES_OCR immagini dei post (in modo sicuro, vedi
-    _fetch_image_safely) e ne estrae il testo con Amazon Textract (OCR
-    retrospettivo). Cattura le PII testuali dentro le foto (documenti, cartelli,
-    screenshot), non solo nella biografia. Ogni immagine è indipendente: un errore
-    o uno scarto su una non blocca le altre.
+    _fetch_image_safely) e ne ricava due segnali: il testo visibile via Amazon
+    Textract (OCR retrospettivo) e le etichette visive via Amazon Rekognition
+    (oggetti/scene/luoghi). Cattura sia le PII testuali dentro le foto sia
+    l'esposizione visiva (dove/cosa mostra la foto). Ogni immagine è indipendente:
+    un errore o uno scarto su una non blocca le altre.
     """
     texts: List[str] = []
+    labels: List[dict] = []
     for url in image_urls[:MAX_POST_IMAGES_OCR]:
         content = _fetch_image_safely(url)
         if not content:
@@ -136,12 +138,30 @@ def _ocr_post_images(image_urls: List[str]) -> List[str]:
         extracted = pii_service.extract_text_from_image(content)
         if extracted and extracted.strip():
             texts.append(extracted.strip())
+        labels.extend(pii_service.detect_image_labels(content))
     if texts:
         logger.info(f"[Textract] OCR post: testo estratto da {len(texts)} immagini.")
-    return texts
+    if labels:
+        logger.info(f"[Rekognition] Etichette visive dai post: {len(labels)} totali.")
+    return texts, _dedupe_labels(labels)
 
 
-def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: Optional[str]):
+def _dedupe_labels(labels: List[dict]) -> List[dict]:
+    """
+    Deduplica le etichette visive per nome (tenendo la confidenza più alta) e le
+    ordina per confidenza decrescente: più immagini possono produrre la stessa
+    etichetta (es. 'Beach') e non ha senso ripeterla nel report.
+    """
+    best: dict = {}
+    for lbl in labels:
+        name = lbl["name"]
+        if name not in best or lbl["confidence"] > best[name]["confidence"]:
+            best[name] = lbl
+    return sorted(best.values(), key=lambda l: l["confidence"], reverse=True)
+
+
+def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: Optional[str],
+                           image_labels: Optional[List[dict]] = None):
     """
     Worker che esegue l'intera pipeline di analisi in un thread daemon.
     Stesso codice in mock e in produzione: cambia solo la sorgente dati
@@ -171,8 +191,12 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
         # restituisce None: in quel caso NON proseguiamo l'analisi su dati inventati
         # — segnaliamo il job come FAILED con un messaggio chiaro. Analizzare una
         # bio mock riporterebbe PII false come reali (problema di integrità dati).
+        # image_labels valorizzato (anche lista vuota) ⇒ è un job da IMMAGINE
+        # caricata: le etichette visive arrivano già dall'endpoint e NON si fa
+        # scraping anche se il testo OCR è vuoto (una foto può non avere testo).
+        is_image_job = image_labels is not None
         target_text = scraped_content
-        if not target_text:
+        if not target_text and not is_image_job:
             target_text, image_urls = scraper_service.scrape_profile_with_images(social_url)
             if not target_text or not target_text.strip():
                 logger.warning(
@@ -186,10 +210,10 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
                 )
                 return
 
-            # OCR retrospettivo sulle immagini dei post (fino al limite configurato):
-            # il testo estratto viene aggiunto a quello analizzato, così le PII
-            # visibili DENTRO le foto (non solo nella bio) vengono rilevate.
-            ocr_texts = _ocr_post_images(image_urls)
+            # Analisi delle immagini dei post (fino al limite configurato): il testo
+            # OCR viene aggiunto a quello analizzato (PII dentro le foto) e le
+            # etichette visive Rekognition alimentano l'esposizione visiva.
+            ocr_texts, image_labels = _process_post_images(image_urls)
             if ocr_texts:
                 target_text += (
                     "\n\n[Testo rilevato nelle immagini dei post]\n" + "\n".join(ocr_texts)
@@ -207,8 +231,10 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
                 seen.add(key)
                 detected_piis.append(entity)
 
-        # Step 4: Generazione report (sintesi narrativa + vettori) su dati deduplicati
-        narrative_summary, social_threats = report_service.generate_report(detected_piis)
+        # Step 4: Generazione report (sintesi narrativa + vettori) su dati deduplicati.
+        # Le etichette visive (Rekognition) arricchiscono il prompt LLM: la sintesi e
+        # i vettori tengono conto anche dell'esposizione dedotta dalle immagini.
+        narrative_summary, social_threats = report_service.generate_report(detected_piis, image_labels)
 
         # Step 5: Calcolo livello di rischio tramite feature engineering (su dati RAW)
         risk_level, risk_explanation, risk_score, risk_motivations = build_risk_assessment(raw_piis)
@@ -216,6 +242,7 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
         # Step 6: Salvataggio risultati → COMPLETED
         results = {
             "detected_pii": [p.model_dump() for p in detected_piis],
+            "image_labels": image_labels or [],
             "narrative_summary": narrative_summary,
             "social_engineering_report": [t.model_dump() for t in social_threats],
             "risk_assessment": {
@@ -248,7 +275,8 @@ def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: O
         storage_service.fail_job(analysis_id, str(e))
 
 
-def _enqueue_job(analysis_id: str, social_url: str, scraped_content: Optional[str]):
+def _enqueue_job(analysis_id: str, social_url: str, scraped_content: Optional[str],
+                 image_labels: Optional[List[dict]] = None):
     """
     Accoda il job per l'elaborazione asincrona.
 
@@ -271,7 +299,7 @@ def _enqueue_job(analysis_id: str, social_url: str, scraped_content: Optional[st
     """
     worker_thread = threading.Thread(
         target=_run_analysis_pipeline,
-        args=(analysis_id, social_url, scraped_content),
+        args=(analysis_id, social_url, scraped_content, image_labels),
         daemon=True,
     )
     worker_thread.start()
@@ -347,21 +375,27 @@ async def analyze_image(file: UploadFile = File(...)):
             detail="Immagine troppo grande (max 8 MB).",
         )
 
-    # OCR: Amazon Textract estrae il testo visibile nell'immagine.
+    # Due segnali complementari sull'immagine: testo visibile (Textract/OCR) ed
+    # etichette visive (Rekognition/DetectLabels). La foto viene analizzata se
+    # espone ALMENO uno dei due: una foto senza testo ma con contesto visivo
+    # (spiaggia, monumento, veicolo) è comunque rilevante per la privacy.
     extracted_text = pii_service.extract_text_from_image(image_bytes)
-    if not extracted_text or not extracted_text.strip():
+    image_labels = pii_service.detect_image_labels(image_bytes)
+    if (not extracted_text or not extracted_text.strip()) and not image_labels:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Nessun testo leggibile rilevato nell'immagine.",
+            detail="Nessun testo né contenuto visivo rilevato nell'immagine.",
         )
 
-    # Riusa la pipeline asincrona passando il testo OCR come 'scraped_content'.
+    # Riusa la pipeline asincrona: il testo OCR come 'scraped_content' e le
+    # etichette visive passate a parte (marcano il job come 'da immagine').
     analysis_id = str(uuid.uuid4())
     source = f"immagine: {file.filename}" if file.filename else "immagine caricata"
     storage_service.create_job(analysis_id=analysis_id, social_url=source, scraped_content=extracted_text)
-    _enqueue_job(analysis_id, source, extracted_text)
+    _enqueue_job(analysis_id, source, extracted_text, image_labels=image_labels)
 
-    logger.info(f"[Textract] Job {analysis_id} da immagine '{file.filename}' accodato ({len(extracted_text)} char OCR).")
+    logger.info(f"[Analisi immagine] Job {analysis_id} da '{file.filename}' accodato "
+                f"({len(extracted_text)} char OCR, {len(image_labels)} etichette).")
     return AnalysisJobResponse(
         analysis_id=analysis_id,
         status="PENDING",
@@ -400,6 +434,7 @@ def get_analysis(analysis_id: str):
         social_url=record["social_url"],
         status=record["status"],
         detected_pii=record.get("detected_pii"),
+        image_labels=record.get("image_labels"),
         narrative_summary=record.get("narrative_summary"),
         social_engineering_report=record.get("social_engineering_report"),
         risk_assessment=record.get("risk_assessment"),

@@ -20,18 +20,23 @@ _PNG_1x1 = bytes.fromhex(
 
 
 def test_analyze_image_accoda_e_completa():
-    """Upload immagine -> 202 con analysis_id -> polling fino a COMPLETED."""
+    """Upload immagine -> 202 con analysis_id -> polling fino a COMPLETED, con
+    etichette visive (Rekognition) presenti nel risultato."""
     r = client.post("/api/analyze-image", files={"file": ("test.png", _PNG_1x1, "image/png")})
     assert r.status_code == 202
     jid = r.json()["analysis_id"]
 
-    status = None
+    result = None
     for _ in range(15):
         time.sleep(1)
-        status = client.get(f"/api/analysis/{jid}").json()["status"]
-        if status in ("COMPLETED", "FAILED"):
+        result = client.get(f"/api/analysis/{jid}").json()
+        if result["status"] in ("COMPLETED", "FAILED"):
             break
-    assert status == "COMPLETED"
+    assert result["status"] == "COMPLETED"
+    # In mock, detect_image_labels restituisce etichette di esempio: devono
+    # comparire nel risultato (esposizione visiva via Rekognition).
+    assert result["image_labels"], "attese etichette visive dall'immagine"
+    assert result["image_labels"][0]["name"]
 
 
 def test_analyze_image_rifiuta_non_immagine():
