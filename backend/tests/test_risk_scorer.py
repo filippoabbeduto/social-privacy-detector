@@ -79,3 +79,29 @@ def test_fiscal_code_contributes_to_score():
     _, _, score, motivations = build_risk_assessment([_pii("FISCAL_CODE", "RSSMRA90E10H501Z")])
     assert score > 0
     assert any("FISCAL_CODE" in m for m in motivations)
+
+
+def test_comprehend_name_address_is_high_risk_doxing():
+    """
+    Regressione: il vocabolario di Amazon Comprehend (NAME, ADDRESS, AGE) deve
+    essere pesato come quello del mock. Nome + indirizzo di casa = doxing → HIGH,
+    e il verdetto NON deve dire "nessuna informazione rilevata" (bug corretto:
+    prima questi tipi ricadevano sul peso di default 5 → score basso incongruente).
+    """
+    piis = [
+        _pii("NAME", "Manuel Amodio", 1.0),
+        _pii("ADDRESS", "Taverna di Montalto, via Monachelle", 1.0),
+        _pii("AGE", "23 anni", 1.0),
+    ]
+    level, explanation, score, _ = build_risk_assessment(piis)
+    assert level == "HIGH"
+    assert score >= 70
+    assert "nessuna informazione" not in explanation.lower()
+    assert "doxing" in explanation.lower()
+
+
+def test_single_address_not_reported_as_no_pii():
+    """Un solo ADDRESS non deve produrre il verdetto 'nessuna informazione'."""
+    _, explanation, score, _ = build_risk_assessment([_pii("ADDRESS", "via Roma 1, Milano")])
+    assert score > 0
+    assert "nessuna informazione" not in explanation.lower()

@@ -11,20 +11,42 @@ from models.schemas import PIIEntity
 # CONFIGURAZIONE PESI E SOGLIE
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Peso base per singola PII (indipendente dalle combinazioni)
-# I pesi sono calibrati per evitare saturazione: un singolo tipo
-# non deve mai superare da solo la soglia MEDIUM (35pt).
+# Peso base per singola PII (indipendente dalle combinazioni).
+# I pesi sono calibrati per evitare saturazione: un singolo tipo non deve mai
+# superare da solo la soglia MEDIUM (35pt).
+#
+# IMPORTANTE: la tabella copre DUE vocabolari, perché la stessa PII può arrivare
+# da fonti diverse:
+#   - Amazon Comprehend (in produzione) usa: NAME, ADDRESS, AGE, PHONE, EMAIL,
+#     DATE_TIME, USERNAME, URL, SSN, ...;
+#   - il motore a regole/mock usa: PHONE_NUMBER, DATE_OF_BIRTH, LOCATION,
+#     ORGANIZATION, FISCAL_CODE, IBAN, ...
+# Tenerli entrambi evita che una PII reale di Comprehend (es. ADDRESS di casa)
+# ricada sul peso di default 5, sotto-stimando gravemente il rischio.
 PII_BASE_WEIGHTS = {
+    # Contatti diretti
     "EMAIL":         20,
     "PHONE_NUMBER":  20,
-    # FISCAL_CODE e IBAN: codici identificativi altamente sensibili (aggiunti
-    # insieme al rilevamento in pii_detector.py). Peso alto come EMAIL/PHONE ma,
-    # per rispettare la regola "nessun singolo tipo supera da solo la soglia
-    # MEDIUM (35pt)", restano a 22.
+    "PHONE":         20,   # Comprehend
+    # Codici/identificativi ad alta sensibilità
     "FISCAL_CODE":   22,
     "IBAN":          22,
-    "DATE_OF_BIRTH": 15,
+    "SSN":           25,   # Comprehend
+    "CREDIT_DEBIT_NUMBER":          25,  # Comprehend
+    "BANK_ACCOUNT_NUMBER":          22,  # Comprehend
+    "INTERNATIONAL_BANK_ACCOUNT_NUMBER": 22,  # Comprehend (IBAN)
+    "PASSPORT_NUMBER":              22,  # Comprehend
+    "DRIVER_ID":                    18,  # Comprehend
+    # Localizzazione fisica: un INDIRIZZO di casa è esposizione fisica grave
+    # (doxing/stalking), molto più di una generica LOCATION/città.
+    "ADDRESS":       25,   # Comprehend
     "LOCATION":       8,
+    # Anagrafica
+    "NAME":          12,   # Comprehend (nome completo = ancora identificativa)
+    "DATE_OF_BIRTH": 15,
+    "AGE":           10,   # Comprehend (meno preciso di una data completa)
+    "DATE_TIME":      4,   # Comprehend: spesso rumoroso (date di eventi), peso basso
+    # Contestuali
     "ORGANIZATION":   5,
     "URL":            5,
     "USERNAME":       4,
@@ -51,6 +73,13 @@ COMBO_BONUSES = [
     ({"EMAIL", "PHONE_NUMBER", "LOCATION"},                    35, "profilo_attacco_completo"),
     ({"EMAIL", "DATE_OF_BIRTH", "LOCATION"},                   30, "identita_completa_geo"),
     ({"EMAIL", "PHONE_NUMBER", "DATE_OF_BIRTH", "LOCATION"},   50, "massima_esposizione"),
+    # Combo su vocabolario Comprehend: nome + indirizzo fisico = doxing/stalking.
+    # È il caso più insidioso: identifica la persona E la sua posizione reale.
+    ({"NAME", "ADDRESS"},                                      25, "doxing_esposizione_fisica"),
+    ({"NAME", "ADDRESS", "AGE"},                               35, "identificazione_completa"),
+    ({"NAME", "ADDRESS", "PHONE"},                             40, "doxing_contattabile"),
+    ({"ADDRESS", "PHONE"},                                     22, "localizzazione_contattabile"),
+    ({"NAME", "PHONE"},                                        18, "identita_contattabile"),
 ]
 
 
@@ -108,10 +137,15 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
     present_types = set(pii_by_type.keys())
 
     # --- Feature booleane ---
-    has_direct_contact  = bool({"EMAIL", "PHONE_NUMBER"} & present_types)
-    has_identity_anchor = "DATE_OF_BIRTH" in present_types
+    # Nota: si considerano ENTRAMBI i vocabolari (Comprehend + regole/mock).
+    has_direct_contact  = bool({"EMAIL", "PHONE_NUMBER", "PHONE"} & present_types)
+    has_identity_anchor = bool({"DATE_OF_BIRTH", "AGE"} & present_types)
     has_location        = "LOCATION" in present_types
     has_org             = "ORGANIZATION" in present_types
+    has_full_name       = "NAME" in present_types
+    has_home_address    = "ADDRESS" in present_types
+    # Doxing: nome completo + indirizzo fisico = identificazione + localizzazione.
+    doxing_ready        = has_full_name and has_home_address
 
     # --- Combinazioni critiche ---
     full_identity_combo   = {"EMAIL", "PHONE_NUMBER", "DATE_OF_BIRTH"}.issubset(present_types)
@@ -131,6 +165,8 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
         "present_types":        present_types,
         "has_direct_contact":   has_direct_contact,
         "has_identity_anchor":  has_identity_anchor,
+        "doxing_ready":         doxing_ready,
+        "has_home_address":     has_home_address,
         "full_identity_combo":  full_identity_combo,
         "spear_phishing_ready": spear_phishing_ready,
         "social_graph_exposed": social_graph_exposed,
@@ -253,7 +289,14 @@ def _build_explanation(risk_level: str, features: dict, score: int) -> str:
     """
     parts = []
 
-    if features["max_exposure"]:
+    if features["doxing_ready"]:
+        parts.append(
+            "Il profilo espone il nome completo insieme a un indirizzo fisico preciso: "
+            "questa combinazione permette l'identificazione diretta della persona e la sua "
+            "localizzazione reale, esponendo a doxing, stalking e attacchi mirati sia "
+            "online sia fisici (furti, molestie, impersonificazione presso servizi locali)."
+        )
+    elif features["max_exposure"]:
         parts.append(
             "Il profilo espone simultaneamente email, telefono, data di nascita e "
             "posizione geografica, fornendo a un attaccante tutti gli elementi per "
@@ -292,10 +335,24 @@ def _build_explanation(risk_level: str, features: dict, score: int) -> str:
             "sufficiente per il recupero di account su molte piattaforme tramite "
             "domande di sicurezza."
         )
+    elif features["has_home_address"]:
+        parts.append(
+            "È esposto un indirizzo fisico: anche senza contatti diretti, rende "
+            "localizzabile la persona e utilizzabile per attacchi mirati o consegne/"
+            "comunicazioni fraudolente che sfruttano la conoscenza del luogo."
+        )
     elif features["contextual_count"] > 0:
         parts.append(
             "I dati contestuali rilevati (location, organizzazioni) non consentono un "
             "attacco diretto ma contribuiscono alla profilazione dell'utente nel tempo."
+        )
+    elif features["unique_type_count"] > 0:
+        # Sono state rilevate PII (es. solo nome, o solo età) che non formano una
+        # combinazione critica: NON è "nessuna informazione", ma esposizione limitata.
+        parts.append(
+            "Sono stati rilevati dati personali identificativi: presi singolarmente non "
+            "consentono un attacco diretto, ma aumentano la tracciabilità del soggetto e, "
+            "se combinati con altre fonti, la sua profilabilità."
         )
     else:
         parts.append(
