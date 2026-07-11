@@ -974,11 +974,10 @@ export default function App() {
                       {result.image_labels.map((l, idx) => (
                         <span
                           key={idx}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface2 px-3 py-1 text-sm"
+                          className="rounded-full border border-line bg-surface2 px-3 py-1 text-sm"
                           title={`Confidenza ${l.confidence.toFixed(0)}%`}
                         >
                           {l.name}
-                          <span className="text-xs font-mono text-faint tabular-nums">{l.confidence.toFixed(0)}%</span>
                         </span>
                       ))}
                     </div>
