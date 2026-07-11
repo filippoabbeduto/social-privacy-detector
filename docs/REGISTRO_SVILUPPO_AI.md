@@ -138,17 +138,7 @@ Ogni voce segue quattro campi:
   condivisi lato frontend); risolto il 502 con `resolver` DNS + `proxy_pass` via variabile
   (risoluzione a runtime dell'upstream).
 
-## 11 — Copertura delle piattaforme di scraping
-
-- **Task**: mantenere solo i social realmente scrapabili col piano gratuito.
-- **File modificati**: `backend/services/scraper.py`, `frontend/src/App.tsx`
-- **Sintesi del prompt**: *"Verifica quali social sono realmente scrapabili col piano
-  gratuito di Apify; rimuovi quelli che non restituiscono dati, motivando la scelta."*
-- **Spiegazione tecnica**: X/Twitter e LinkedIn non restituiscono dati sul piano gratuito;
-  rimossi per non lasciare percorsi non funzionanti, mantenendo Instagram, TikTok e
-  Facebook; scelta documentata in relazione.
-
-## 12 — Stesura della relazione
+## 11 — Stesura della relazione
 
 - **Task**: strutturare e approfondire la relazione, allineandola al codice reale.
 - **File modificati**: `relazione/relazione.tex`
