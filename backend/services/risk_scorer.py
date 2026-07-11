@@ -58,6 +58,13 @@ RISK_THRESHOLDS = {
     "MEDIUM": 35,
 }
 
+# Soglia minima di confidence per far contribuire una PII al PUNTEGGIO.
+# I rilevamenti troppo incerti (es. Comprehend che tagga spazzatura OCR a 0.49)
+# non devono pesare né innescare combo. NB: filtra solo il calcolo dello score,
+# non la lista di PII mostrata all'utente. I codici IT (CF/IBAN) e i tipi solidi
+# stanno ben sopra questa soglia, quindi non vengono toccati.
+CONFIDENCE_FLOOR = 0.55
+
 # Bonus combinazioni pericolose (social engineering combos)
 # Formato: (set di tipi richiesti, bonus punti, label descrittiva)
 # NOTA: viene applicata SOLO la combo più specifica (con più tipi matchanti)
@@ -239,13 +246,19 @@ def calculate_risk_score(features: dict) -> Tuple[int, List[str]]:
         COMBO_BONUSES, key=lambda x: len(x[0]), reverse=True
     ):
         if required_types.issubset(features["present_types"]):
-            best_combo = (bonus, label)
+            best_combo = (required_types, bonus, label)
             break
 
     if best_combo:
-        score += best_combo[0]
+        required_types, bonus, label = best_combo
+        # #1: una combo vale quanto il suo anello più debole. Si scala il bonus per
+        # il moltiplicatore di confidence MINIMO tra i tipi che la compongono, così
+        # una combinazione basata su un rilevamento incerto non pesa a forza piena.
+        conf_factor = min(_confidence_multiplier(pii_by_type[t]) for t in required_types)
+        applied = round(bonus * conf_factor)
+        score += applied
         motivations.append(
-            f"Combo '{best_combo[1]}': +{best_combo[0]}pt (combinazione ad alto rischio di social engineering)"
+            f"Combo '{label}': +{applied}pt (combinazione ad alto rischio di social engineering)"
         )
 
     # 5. Bonus diversità dell'esposizione
@@ -268,7 +281,11 @@ def build_risk_assessment(detected_piis: List[PIIEntity]) -> Tuple[str, str, int
     Entry point principale del modulo.
     Restituisce: (risk_level, explanation, numeric_score, motivations)
     """
-    features = extract_features(detected_piis)
+    # #2: si calcola il punteggio SOLO sui rilevamenti abbastanza affidabili.
+    # Sotto la soglia il dato è troppo incerto per pesare (né base, né combo, né
+    # diversità). La lista PII mostrata all'utente resta invariata a monte.
+    reliable_piis = [p for p in detected_piis if p.score >= CONFIDENCE_FLOOR]
+    features = extract_features(reliable_piis)
     score, motivations = calculate_risk_score(features)
 
     if score >= RISK_THRESHOLDS["HIGH"]:

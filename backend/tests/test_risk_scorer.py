@@ -105,3 +105,25 @@ def test_single_address_not_reported_as_no_pii():
     _, explanation, score, _ = build_risk_assessment([_pii("ADDRESS", "via Roma 1, Milano")])
     assert score > 0
     assert "nessuna informazione" not in explanation.lower()
+
+
+def test_low_confidence_detections_ignored_in_score():
+    """#2: i rilevamenti sotto la soglia di confidence non incidono sul punteggio
+    (né come peso, né innescando combo)."""
+    piis = [
+        _pii("EMAIL", "a@b.com", 0.99),   # affidabile
+        _pii("ADDRESS", "cooo", 0.51),    # spazzatura, sotto soglia
+        _pii("NAME", "x", 0.40),          # sotto soglia
+    ]
+    _, explanation, _, motivations = build_risk_assessment(piis)
+    assert not any("ADDRESS" in m for m in motivations)
+    assert not any("NAME" in m for m in motivations)
+    assert "doxing" not in explanation.lower()  # la combo nome+indirizzo NON scatta
+
+
+def test_combo_scaled_by_confidence():
+    """#1: la stessa combo (nome + indirizzo) pesa meno se i rilevamenti hanno
+    confidence più bassa: lo score cala."""
+    high = build_risk_assessment([_pii("NAME", "x", 0.99), _pii("ADDRESS", "y", 0.99)])[2]
+    mid = build_risk_assessment([_pii("NAME", "x", 0.70), _pii("ADDRESS", "y", 0.70)])[2]
+    assert mid < high
