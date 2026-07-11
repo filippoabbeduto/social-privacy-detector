@@ -91,6 +91,16 @@ interface AnalysisResult {
   error?: string;
 }
 
+// Le tre modalità di analisi, ognuna con il PROPRIO stato di risultato.
+type Mode = "profile" | "bio" | "image";
+interface ModeState {
+  result: AnalysisResult | null;
+  error: string | null;
+  jobStatus: string | null;
+  loading: boolean;
+}
+const EMPTY_STATE: ModeState = { result: null, error: null, jobStatus: null, loading: false };
+
 // Etichette leggibili + icona per ogni tipo di PII restituito dal backend.
 const PII_META: Record<string, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
   NAME: { label: "Nome", Icon: User },
@@ -246,10 +256,6 @@ export default function App() {
   // ─── Stato form / analisi ───
   const [socialUrl, setSocialUrl] = useState("");
   const [scrapedContent, setScrapedContent] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<number | null>(null);
   // Esempi collassabili, chiusi di default: tengono il form pulito.
   const [showExamples, setShowExamples] = useState(false);
@@ -257,11 +263,25 @@ export default function App() {
   //  - "profile": analizza un profilo reale (scraping dei dati pubblici);
   //  - "bio":     analizza un testo di biografia incollato (controllo pre-pubblicazione);
   //  - "image":   analizza una foto (OCR Textract + visione Rekognition).
-  const [mode, setMode] = useState<"profile" | "bio" | "image">("profile");
+  const [mode, setMode] = useState<Mode>("profile");
   // Immagine selezionata ma NON ancora analizzata: l'analisi parte solo al click
   // esplicito su "Analizza", non alla semplice selezione del file.
   const [imageFile, setImageFile] = useState<File | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Stato dei risultati SEPARATO per ogni modalità: ognuna conserva il proprio
+  // esito, così il risultato di una sezione NON compare nelle altre e non va perso
+  // cambiando sezione. Si azzera solo con una nuova analisi nella stessa modalità
+  // (o alla chiusura dell'app, quando lo stato torna vuoto).
+  const [states, setStates] = useState<Record<Mode, ModeState>>({
+    profile: EMPTY_STATE,
+    bio: EMPTY_STATE,
+    image: EMPTY_STATE,
+  });
+  const patchState = (m: Mode, p: Partial<ModeState>) =>
+    setStates((s) => ({ ...s, [m]: { ...s[m], ...p } }));
+  // Valori della modalità attualmente visualizzata (li usa la colonna dei risultati).
+  const { result, error, jobStatus, loading: isLoading } = states[mode];
 
   // Ferma il polling in corso. Centralizzato perché serve a più handler
   // (cambio modalità, pulisci, esito COMPLETED/FAILED, smontaggio del componente).
@@ -271,13 +291,8 @@ export default function App() {
       pollingRef.current = null;
     }
   };
-  // Riporta la vista risultati allo stato iniziale (nessun esito, nessun errore).
-  const resetOutcome = () => {
-    setResult(null);
-    setError(null);
-    setJobStatus(null);
-    setIsLoading(false);
-  };
+  // Riporta la modalità corrente allo stato iniziale (nessun esito, nessun errore).
+  const resetOutcome = () => patchState(mode, EMPTY_STATE);
 
   // Allo smontaggio, interrompe un eventuale polling attivo.
   useEffect(() => stopPolling, []);
@@ -286,25 +301,26 @@ export default function App() {
   const applyTemplate = (index: number) => {
     setScrapedContent(DEMO_PROFILES[index].content);
     setActiveTemplate(index);
-    setError(null);
+    patchState("bio", { error: null });
   };
 
-  const startPolling = (analysisId: string) => {
+  // Polling dello stato del job. 'm' identifica la modalità che ha avviato
+  // l'analisi, così l'esito viene scritto NELLO stato di quella sezione anche se
+  // nel frattempo l'utente ne sta guardando un'altra.
+  const startPolling = (analysisId: string, m: Mode) => {
     stopPolling();
     pollingRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/analysis/${analysisId}`);
         if (!res.ok) throw new Error(`Polling error: ${res.status}`);
         const data: AnalysisResult = await res.json();
-        setJobStatus(data.status);
+        patchState(m, { jobStatus: data.status });
         if (data.status === "COMPLETED") {
           stopPolling();
-          setResult(data);
-          setIsLoading(false);
+          patchState(m, { result: data, loading: false });
         } else if (data.status === "FAILED") {
           stopPolling();
-          setError(data.error || "Analisi non riuscita.");
-          setIsLoading(false);
+          patchState(m, { error: data.error || "Analisi non riuscita.", loading: false });
         }
       } catch (err) {
         console.error("Polling error:", err); // errori di rete temporanei: continua il polling
@@ -314,14 +330,9 @@ export default function App() {
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!socialUrl.trim()) {
-      setError("Inserisci l'indirizzo del profilo social da analizzare.");
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    setResult(null);
-    setJobStatus("PENDING");
+    // Campo vuoto: non si parte (il bottone è comunque disabilitato). Guardia.
+    if (!socialUrl.trim()) return;
+    patchState("profile", { loading: true, error: null, result: null, jobStatus: "PENDING" });
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -332,12 +343,14 @@ export default function App() {
       });
       if (!response.ok) throw new Error(`Il server ha risposto ${response.status}.`);
       const job = await response.json();
-      startPolling(job.analysis_id);
+      startPolling(job.analysis_id, "profile");
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Impossibile raggiungere il servizio di analisi. Riprova più tardi.");
-      setIsLoading(false);
-      setJobStatus(null);
+      patchState("profile", {
+        error: err.message || "Impossibile raggiungere il servizio di analisi. Riprova più tardi.",
+        loading: false,
+        jobStatus: null,
+      });
     }
   };
 
@@ -349,10 +362,7 @@ export default function App() {
     // Testo vuoto: non si parte, senza mostrare errori (il bottone è comunque
     // disabilitato in questo caso; guardia di sicurezza, coerente con profilo/immagine).
     if (!scrapedContent.trim()) return;
-    setIsLoading(true);
-    setError(null);
-    setResult(null);
-    setJobStatus("PENDING");
+    patchState("bio", { loading: true, error: null, result: null, jobStatus: "PENDING" });
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -361,22 +371,21 @@ export default function App() {
       });
       if (!response.ok) throw new Error(`Il server ha risposto ${response.status}.`);
       const job = await response.json();
-      startPolling(job.analysis_id);
+      startPolling(job.analysis_id, "bio");
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Impossibile raggiungere il servizio di analisi. Riprova più tardi.");
-      setIsLoading(false);
-      setJobStatus(null);
+      patchState("bio", {
+        error: err.message || "Impossibile raggiungere il servizio di analisi. Riprova più tardi.",
+        loading: false,
+        jobStatus: null,
+      });
     }
   };
 
   // Analisi da immagine: carica il file su /api/analyze-image (OCR Textract lato
   // backend), poi riusa lo stesso polling del flusso testuale.
   const handleImageUpload = async (file: File) => {
-    setIsLoading(true);
-    setError(null);
-    setResult(null);
-    setJobStatus("PENDING");
+    patchState("image", { loading: true, error: null, result: null, jobStatus: "PENDING" });
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -392,25 +401,22 @@ export default function App() {
         throw new Error(msg);
       }
       const job = await res.json();
-      startPolling(job.analysis_id);
+      startPolling(job.analysis_id, "image");
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Caricamento immagine non riuscito.");
-      setIsLoading(false);
-      setJobStatus(null);
+      patchState("image", {
+        error: err.message || "Caricamento immagine non riuscito.",
+        loading: false,
+        jobStatus: null,
+      });
     }
   };
 
-  // Cambio modalità (Profilo/Immagine): cambia SOLO l'input mostrato a sinistra.
-  // L'ultimo report a destra NON viene azzerato: resta visibile finché non parte
-  // una nuova analisi (profilo o immagine) o non si chiude/aggiorna l'app.
-  const selectMode = (m: "profile" | "bio" | "image") => {
-    if (m === mode) return;
-    setMode(m);
-    // Azzera un eventuale errore della modalità precedente (es. "manca la
-    // biografia"): non ha senso mostrarlo nelle altre sezioni. Il report, invece,
-    // resta visibile finché non parte una nuova analisi.
-    setError(null);
+  // Cambio modalità: mostra soltanto la sezione scelta. Ogni modalità ha il suo
+  // stato (risultato/errore/caricamento), quindi cambiando sezione si vede il suo
+  // esito precedente (o nulla) e mai quello di un'altra: nessun travaso.
+  const selectMode = (m: Mode) => {
+    if (m !== mode) setMode(m);
   };
 
   // Scarica l'ultimo report come PDF (nessun login: l'utente conserva in locale
@@ -664,7 +670,7 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isLoading}
+                  disabled={isLoading || !socialUrl.trim()}
                   className="w-2/3 rounded-xl bg-accent text-accentink py-2.5 text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-60 shadow-soft"
                 >
                   {isLoading ? (
