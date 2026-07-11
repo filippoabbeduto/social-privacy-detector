@@ -346,10 +346,9 @@ export default function App() {
   // (controllo pre-pubblicazione: "quanto è sicuro ciò che scrivo in bio?").
   const handleAnalyzeBio = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!scrapedContent.trim()) {
-      setError("Incolla il testo della biografia da analizzare.");
-      return;
-    }
+    // Testo vuoto: non si parte, senza mostrare errori (il bottone è comunque
+    // disabilitato in questo caso; guardia di sicurezza, coerente con profilo/immagine).
+    if (!scrapedContent.trim()) return;
     setIsLoading(true);
     setError(null);
     setResult(null);
@@ -715,7 +714,7 @@ export default function App() {
                     </button>
                     <button
                       type="submit"
-                      disabled={isLoading}
+                      disabled={isLoading || !scrapedContent.trim()}
                       className="w-2/3 rounded-xl bg-accent text-accentink py-2.5 text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-60 shadow-soft"
                     >
                       {isLoading ? (
