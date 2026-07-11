@@ -53,7 +53,6 @@ services:
       - LLM_BASE_URL=${LLM_BASE_URL:-}
       - LLM_MODEL=${LLM_MODEL:-}
       - LLM_API_KEY=${LLM_API_KEY:-}
-      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-us.anthropic.claude-sonnet-4-5-20250929-v1:0}
       - APIFY_API_TOKEN=${APIFY_API_TOKEN:-mock_apify_token}
     networks:
       - sdcc-network

@@ -60,7 +60,7 @@ Ogni voce segue quattro campi:
 - **Task**: generare sintesi e vettori d'attacco con un LLM, in modo intercambiabile.
 - **File modificati**: `backend/services/report_generator.py`
 - **Sintesi del prompt**: *"Il report va generato da un LLM. Rendi il provider switchable
-  (Bedrock/Gemini/mock) con un solo code path OpenAI-compatible, e progetta il prompt con
+  (Gemini/mock) con un solo code path OpenAI-compatible, e progetta il prompt con
   few-shot, output strutturato JSON e difese contro il prompt injection sul testo
   scrapato."*
 - **Spiegazione tecnica**: provider intercambiabili via `REPORT_PROVIDER`; prompt con

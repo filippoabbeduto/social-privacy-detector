@@ -36,7 +36,7 @@ Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'ana
 | CI/CD | GitHub Actions → Amazon ECR → EC2 |
 | Hosting | Amazon EC2 (t3.micro) + Nginx (TLS su 443) |
 | PII Detection | Amazon Comprehend + Textract (mock locale via Regex) |
-| AI Report | Google Gemini (gemini-2.5-flash) — LLM esterno; Bedrock alternativa switchable; mock locale deterministico |
+| AI Report | Google Gemini (gemini-2.5-flash) — LLM esterno; mock locale deterministico |
 | Database | Amazon DynamoDB (mock locale in-memory) |
 | Storage | Amazon S3 (mock locale in-memory) |
 

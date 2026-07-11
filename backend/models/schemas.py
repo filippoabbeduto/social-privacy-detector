@@ -38,7 +38,7 @@ class PIIEntity(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SOCIAL ENGINEERING THREAT MODEL (Output del report LLM — Gemini/Bedrock/mock)
+# SOCIAL ENGINEERING THREAT MODEL (Output del report LLM — Gemini/mock)
 # ──────────────────────────────────────────────────────────────────────────────
 
 class SocialEngineeringThreat(BaseModel):

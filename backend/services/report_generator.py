@@ -1,8 +1,7 @@
 # ==============================================================================
 # REPORT GENERATOR SERVICE - Generazione Report AI (SDCC)
 # Provider switchable via REPORT_PROVIDER: "gemini" (default — Google Gemini via
-# endpoint OpenAI-compatible), "bedrock" (Amazon Bedrock/Claude, alternativa
-# mantenuta per sviluppo futuro) o "mock" (deterministico). In AWS_MOCK gira il mock.
+# endpoint OpenAI-compatible) o "mock" (deterministico). In AWS_MOCK gira il mock.
 # ==============================================================================
 
 import os
@@ -22,19 +21,16 @@ class ReportGeneratorService:
     Genera report di social engineering basati sulle PII rilevate.
 
     Modalita MOCK: logica deterministica basata sui tipi di PII trovati.
-    Modalita PRODUZIONE: invoca il provider LLM configurato (default Google Gemini;
-    Amazon Bedrock/Claude come alternativa) per il report in linguaggio naturale.
+    Modalita PRODUZIONE: invoca il provider LLM configurato (default Google Gemini)
+    per il report in linguaggio naturale.
     """
 
     def __init__(self):
-        self.bedrock_client = None
-
         # Provider del report generativo, selezionabile via env (architettura
-        # "switchable"): "gemini" (default, API esterna gratuita), "bedrock" (AWS,
-        # quando la quota è disponibile) oppure "mock" (deterministico).
-        # I provider LLM esterni (Gemini/DeepSeek/OpenAI) espongono tutti un
-        # endpoint OpenAI-compatible, quindi condividono UN SOLO code path: cambia
-        # solo base_url + modello + chiave.
+        # "switchable"): "gemini" (default, API esterna gratuita) oppure "mock"
+        # (deterministico). I provider LLM esterni (Gemini/DeepSeek/OpenAI) espongono
+        # tutti un endpoint OpenAI-compatible, quindi condividono UN SOLO code path:
+        # cambia solo base_url + modello + chiave.
         self.report_provider = os.getenv("REPORT_PROVIDER", "gemini").lower()
 
         if self.report_provider == "gemini":
@@ -51,16 +47,6 @@ class ReportGeneratorService:
             self.llm_model = os.getenv("LLM_MODEL", "").strip()
             self.llm_api_key = os.getenv("LLM_API_KEY", "").strip()
 
-        # Il client Bedrock si inizializza solo se il provider scelto è "bedrock".
-        if not AWS_MOCK and self.report_provider == "bedrock":
-            try:
-                import boto3
-                region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
-                self.bedrock_client = boto3.client("bedrock-runtime", region_name=region)
-                logger.info("ReportGeneratorService: Client AWS Bedrock Runtime inizializzato.")
-            except Exception as e:
-                logger.error(f"ReportGeneratorService: Impossibile inizializzare Bedrock. Errore: {e}")
-
     # --------------------------------------------------------------------------
     # METODO PRINCIPALE
     # --------------------------------------------------------------------------
@@ -73,10 +59,6 @@ class ReportGeneratorService:
         sempre sul mock, così la pipeline non si interrompe mai.
         """
         if AWS_MOCK:
-            return self._mock_summary(pii_list), self._generate_mock(pii_list)
-        if self.report_provider == "bedrock":
-            if self.bedrock_client:
-                return self._generate_with_bedrock(pii_list)
             return self._mock_summary(pii_list), self._generate_mock(pii_list)
         if self.report_provider == "mock":
             return self._mock_summary(pii_list), self._generate_mock(pii_list)
@@ -229,8 +211,7 @@ class ReportGeneratorService:
     def _generate_with_llm(self, pii_list: List[PIIEntity]) -> Tuple[str, List[SocialEngineeringThreat]]:
         """
         Genera il report (sintesi + vettori) tramite un'API LLM esterna
-        OpenAI-compatible (default Google Gemini). Usato al posto di Bedrock quando
-        la quota AWS non è disponibile; Bedrock resta alternativa via REPORT_PROVIDER.
+        OpenAI-compatible (default Google Gemini).
         """
         if not self.llm_api_key:
             logger.warning("[LLM Report] Chiave API mancante (GEMINI_API_KEY/LLM_API_KEY). Fallback su mock.")
@@ -266,9 +247,9 @@ class ReportGeneratorService:
     def _generate_mock(self, pii_list: List[PIIEntity]) -> List[SocialEngineeringThreat]:
         """
         Genera scenari di minaccia deterministici basati sui tipi di PII trovati.
-        Simula l'output che Claude produrrebbe su Bedrock.
+        Simula l'output che l'LLM produrrebbe, usato in mock e come fallback.
         """
-        logger.info("[MOCK Bedrock] Generazione report minacce deterministico")
+        logger.info("[MOCK Report] Generazione report minacce deterministico")
         threats: List[SocialEngineeringThreat] = []
 
         pii_types = {p.type for p in pii_list}
@@ -371,48 +352,3 @@ class ReportGeneratorService:
             ))
 
         return threats
-
-    # --------------------------------------------------------------------------
-    # IMPLEMENTAZIONE REALE: Amazon Bedrock (Claude)
-    # --------------------------------------------------------------------------
-
-    def _generate_with_bedrock(self, pii_list: List[PIIEntity]) -> Tuple[str, List[SocialEngineeringThreat]]:
-        """
-        Invoca Claude su Amazon Bedrock per generare l'analisi delle minacce.
-        """
-        logger.info("[AWS Bedrock] Invocazione Claude per report minacce")
-
-        # NOTA: NIENTE "temperature" qui. I modelli Claude recenti (Opus 4.8/4.7,
-        # Sonnet 5) accettano solo adaptive thinking e rifiutano temperature/top_p/
-        # budget_tokens con un errore 400 ValidationException. Su Haiku 3 era
-        # ammesso, ma toglierlo funziona su entrambi.
-        prompt_body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 2000,
-            # Stesse tecniche di prompting anche su Bedrock: 'system' (ruolo + regole
-            # difensive + esempio few-shot) separato dai dati PII nel messaggio user.
-            "system": self._system_prompt(),
-            "messages": [{"role": "user", "content": self._build_prompt(pii_list)}],
-        }
-
-        try:
-            # Model id configurabile via .env. Default: Sonnet 4.5 tramite inference
-            # profile cross-region "us." — i modelli Claude recenti su Bedrock
-            # richiedono l'inference profile (non l'id "anthropic.*" grezzo) per
-            # l'invocazione on-demand in us-east-1. Per usare Haiku metti
-            # BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0 nel .env.
-            model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
-            response = self.bedrock_client.invoke_model(
-                modelId=model_id,
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps(prompt_body)
-            )
-
-            response_body = json.loads(response["body"].read())
-            content_text = response_body.get("content", [{}])[0].get("text", "{}")
-            return self._parse_report(content_text, pii_list)
-
-        except Exception as e:
-            logger.error(f"Errore Bedrock Claude: {e}. Fallback su mock.")
-            return self._mock_summary(pii_list), self._generate_mock(pii_list)

@@ -11,12 +11,6 @@
 #   - TikTok    (bio, nickname, post descriptions)
 #   - Facebook  (bio, about, name)
 #
-# NOTA: Twitter/X e LinkedIn NON sono inclusi. Sul piano gratuito Apify i loro
-# Actor non restituiscono dati (X: solo placeholder {"noResults"}/{"demo"};
-# LinkedIn: serve cookie/autenticazione). Servono un abbonamento Apify a pagamento
-# o, per X, l'API ufficiale (dal 2026 solo pay-per-use, senza free tier).
-# Dettagli e motivazioni nella relazione (capitolo Limitazioni).
-#
 # In mock mode restituisce biografie simulate per la demo offline.
 # ==============================================================================
 
@@ -178,14 +172,6 @@ _register_platform(
 )
 
 
-# ── TWITTER / X — RIMOSSO ────────────────────────────────────────────────────
-# Twitter/X non è supportato: gli Actor Apify per X non restituiscono dati sul
-# piano gratuito (vedi nota in testa al file). Se in futuro si attiva un piano
-# Apify a pagamento, basta ri-registrare una piattaforma "twitter" con l'Actor
-# adeguato (campo input 'maxItems' per il limite, output: oggetto 'author' +
-# campo 'text' per tweet), sullo stesso schema delle altre piattaforme.
-
-
 # ── FACEBOOK ─────────────────────────────────────────────────────────────────
 
 def _facebook_input(url: str) -> dict:
@@ -231,14 +217,6 @@ _register_platform(
 )
 
 
-# ── LINKEDIN — RIMOSSO ───────────────────────────────────────────────────────
-# LinkedIn non è supportato, stessa ragione di Twitter/X: l'actor Apify
-# (curious_coder/linkedin-profile-scraper) sul piano gratuito non restituisce
-# dati (serve cookie/autenticazione o un piano a pagamento). Ri-attivabile
-# registrando una piattaforma "linkedin" con l'actor adeguato, sullo stesso
-# schema delle altre piattaforme.
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # SERVIZIO SCRAPER
 # ──────────────────────────────────────────────────────────────────────────────
@@ -251,7 +229,6 @@ class ScraperService:
     Modalità PRODUZIONE: invoca Apify REST API per scraping reale multi-piattaforma.
 
     Piattaforme supportate: Instagram, TikTok, Facebook.
-    (Twitter/X e LinkedIn esclusi: i loro Actor Apify non restituiscono dati sul piano free.)
     """
 
     SUPPORTED_PLATFORMS = list(PLATFORM_CONFIGS.keys())
@@ -327,7 +304,7 @@ class ScraperService:
                 "Cloud Architect presso Reply a Milano. "
                 "Gestisco infrastrutture AWS e progetto soluzioni serverless. "
                 "Contatto professionale: mario.rossi@reply.it. "
-                "LinkedIn: https://linkedin.com/in/mario-rossi-cloud "
+                "Portfolio personale: https://mario-rossi.dev "
                 "Certificato AWS Solutions Architect Professional."
             )
         elif "cyber" in url_lower or "secure" in url_lower:

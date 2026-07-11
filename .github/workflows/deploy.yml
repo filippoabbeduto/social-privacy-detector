@@ -10,8 +10,8 @@ on:
     branches: [main]
 
 env:
-  # us-east-1: stessa regione dei servizi AWS del progetto (Bedrock/Claude,
-  # Comprehend, DynamoDB, S3). ECR ed EC2 devono stare qui per coerenza.
+  # us-east-1: stessa regione dei servizi AWS del progetto (Comprehend,
+  # Textract, DynamoDB, S3). ECR ed EC2 devono stare qui per coerenza.
   AWS_REGION: us-east-1
   ECR_FRONTEND: social-privacy-frontend
   ECR_BACKEND: social-privacy-backend

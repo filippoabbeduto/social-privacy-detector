@@ -14,6 +14,6 @@ fastapi==0.139.0          # framework REST asincrono
 uvicorn[standard]==0.50.2 # server ASGI; [standard] aggiunge uvloop/httptools (performance) e websockets
 python-multipart==0.0.20  # parsing multipart/form-data: necessario per l'upload immagini (UploadFile) dell'endpoint OCR
 pydantic==2.13.4          # validazione modelli I/O (Pydantic v2)
-boto3==1.43.40            # AWS SDK per Python (Comprehend, Textract, Bedrock, DynamoDB, S3)
+boto3==1.43.40            # AWS SDK per Python (Comprehend, Textract, DynamoDB, S3)
 openai==2.44.0            # SDK OpenAI usato contro endpoint OpenAI-compatible (Gemini/DeepSeek/OpenAI) per il report generativo
 requests==2.34.2          # client HTTP usato per l'API REST di Apify
