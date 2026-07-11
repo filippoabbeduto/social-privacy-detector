@@ -8,7 +8,6 @@ import {
   Trash2,
   ChevronRight,
   ChevronDown,
-  Plus,
   Download,
   AlertTriangle,
   ShieldCheck,
@@ -30,10 +29,9 @@ import {
   Cpu,
   ScanText,
   Sparkles,
-  Eye,
 } from "lucide-react";
 
-// ─── Profili di esempio: popolano il form per provare i diversi livelli di rischio ───
+// ─── Esempi di biografia: popolano la textarea (modalità "bio") per provare i diversi livelli di rischio ───
 const DEMO_PROFILES = [
   {
     label: "Instagram — esposizione alta",
@@ -253,13 +251,13 @@ export default function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<number | null>(null);
-  // Input opzionali nascosti di default: si aprono al click dell'utente per
-  // tenere il form pulito e focalizzato sull'unico campo obbligatorio (l'URL).
-  const [showBio, setShowBio] = useState(false);
+  // Esempi collassabili, chiusi di default: tengono il form pulito.
   const [showExamples, setShowExamples] = useState(false);
-  // Modalità di analisi selezionabile dalla navbar: "profile" (URL + bio) oppure
-  // "image" (upload di una foto, controllo pre-pubblicazione via OCR Textract).
-  const [mode, setMode] = useState<"profile" | "image">("profile");
+  // Modalità di analisi selezionabile dalla navbar:
+  //  - "profile": analizza un profilo reale (scraping dei dati pubblici);
+  //  - "bio":     analizza un testo di biografia incollato (controllo pre-pubblicazione);
+  //  - "image":   analizza una foto (OCR Textract + visione Rekognition).
+  const [mode, setMode] = useState<"profile" | "bio" | "image">("profile");
   // Immagine selezionata ma NON ancora analizzata: l'analisi parte solo al click
   // esplicito su "Analizza", non alla semplice selezione del file.
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -284,11 +282,10 @@ export default function App() {
   // Allo smontaggio, interrompe un eventuale polling attivo.
   useEffect(() => stopPolling, []);
 
+  // Riempie la textarea della biografia con un esempio pronto (modalità "bio").
   const applyTemplate = (index: number) => {
-    setSocialUrl(DEMO_PROFILES[index].url);
     setScrapedContent(DEMO_PROFILES[index].content);
     setActiveTemplate(index);
-    setShowBio(true); // mostra il testo popolato dal template
     setError(null);
   };
 
@@ -329,10 +326,39 @@ export default function App() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          social_url: socialUrl,
-          scraped_content: scrapedContent.trim() ? scrapedContent : null,
-        }),
+        // Modalità profilo: si analizzano i dati reali restituiti dallo scraping,
+        // quindi NON si invia testo manuale (scraped_content = null).
+        body: JSON.stringify({ social_url: socialUrl, scraped_content: null }),
+      });
+      if (!response.ok) throw new Error(`Il server ha risposto ${response.status}.`);
+      const job = await response.json();
+      startPolling(job.analysis_id);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Impossibile raggiungere il servizio di analisi. Riprova più tardi.");
+      setIsLoading(false);
+      setJobStatus(null);
+    }
+  };
+
+  // Analisi di un testo di biografia incollato manualmente: NON fa scraping,
+  // passa direttamente il testo come scraped_content sullo stesso endpoint
+  // (controllo pre-pubblicazione: "quanto è sicuro ciò che scrivo in bio?").
+  const handleAnalyzeBio = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scrapedContent.trim()) {
+      setError("Incolla il testo della biografia da analizzare.");
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    setResult(null);
+    setJobStatus("PENDING");
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ social_url: "Biografia inserita", scraped_content: scrapedContent }),
       });
       if (!response.ok) throw new Error(`Il server ha risposto ${response.status}.`);
       const job = await response.json();
@@ -379,7 +405,7 @@ export default function App() {
   // Cambio modalità (Profilo/Immagine): cambia SOLO l'input mostrato a sinistra.
   // L'ultimo report a destra NON viene azzerato: resta visibile finché non parte
   // una nuova analisi (profilo o immagine) o non si chiude/aggiorna l'app.
-  const selectMode = (m: "profile" | "image") => {
+  const selectMode = (m: "profile" | "bio" | "image") => {
     if (m === mode) return;
     setMode(m);
   };
@@ -489,7 +515,6 @@ export default function App() {
     setSocialUrl("");
     setScrapedContent("");
     setActiveTemplate(null);
-    setShowBio(false);
     setShowExamples(false);
     setImageFile(null);
     resetOutcome();
@@ -512,7 +537,7 @@ export default function App() {
             <h1 className="font-display text-[17px] font-bold tracking-tight">Social Privacy Detector</h1>
           </div>
 
-          {/* Gruppo destro: stato AWS, tab modalità (Profilo/Immagine), tema */}
+          {/* Gruppo destro: stato AWS, tab modalità (Profilo/Biografia/Immagine), tema */}
           <div className="flex items-center gap-2.5">
             <span className="hidden md:flex items-center gap-1.5 text-xs text-muted border border-line rounded-full px-3 py-1.5 bg-surface">
               <span className="w-1.5 h-1.5 rounded-full bg-low" />
@@ -528,6 +553,15 @@ export default function App() {
                 }`}
               >
                 Profilo
+              </button>
+              <button
+                type="button"
+                onClick={() => selectMode("bio")}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                  mode === "bio" ? "bg-accent text-accentink" : "text-muted hover:text-ink"
+                }`}
+              >
+                Biografia
               </button>
               <button
                 type="button"
@@ -563,6 +597,16 @@ export default function App() {
               <p className="text-muted text-sm sm:text-base leading-relaxed mt-3">
                 Da una biografia e pochi post, un estraneo può ricostruire chi sei, dove vivi e come
                 contattarti. Individua i dati personali esposti, i possibili attacchi e un punteggio di rischio.
+              </p>
+            </>
+          ) : mode === "bio" ? (
+            <>
+              <h2 className="font-display text-3xl sm:text-[38px] leading-[1.1] font-extrabold tracking-tight">
+                Cosa esponi nella tua biografia?
+              </h2>
+              <p className="text-muted text-sm sm:text-base leading-relaxed mt-3">
+                Prima di scriverlo nel profilo, incolla il testo della bio e verifica quali dati personali
+                riveleresti — e quanto rischio comportano — senza pubblicarlo davvero.
               </p>
             </>
           ) : (
@@ -605,43 +649,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Testo/biografia manuale: opzionale, nascosto dietro un link */}
-              {!showBio ? (
-                <button
-                  type="button"
-                  onClick={() => setShowBio(true)}
-                  className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-accent transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  Aggiungi bio o testo dei post <span className="text-faint">(facoltativo)</span>
-                </button>
-              ) : (
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowBio(false)}
-                    className="w-full flex items-center justify-between text-sm font-semibold hover:text-accent transition-colors"
-                  >
-                    <span>
-                      Biografia o testo dei post <span className="text-faint font-normal">(facoltativo)</span>
-                    </span>
-                    <ChevronDown className="w-4 h-4 rotate-180 text-faint" />
-                  </button>
-                  <textarea
-                    id="scraped-content"
-                    aria-label="Biografia o testo dei post"
-                    rows={6}
-                    value={scrapedContent}
-                    onChange={(e) => {
-                      setScrapedContent(e.target.value);
-                      setActiveTemplate(null);
-                    }}
-                    placeholder="Se lo lasci vuoto, il testo pubblico viene recuperato automaticamente dal profilo indicato."
-                    className="w-full rounded-xl border border-line bg-bg p-3.5 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus:border-accent transition-colors resize-y"
-                  />
-                </div>
-              )}
-
               <div className="flex gap-3 pt-1">
                 <button
                   type="button"
@@ -672,35 +679,85 @@ export default function App() {
               </div>
             </form>
 
-            {/* Profili di esempio (collassabili, chiusi di default) */}
-            <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
-              <button
-                type="button"
-                onClick={() => setShowExamples((v) => !v)}
-                className="w-full flex items-center justify-between text-[11px] uppercase tracking-wider text-muted font-semibold hover:text-ink transition-colors"
-              >
-                <span>Profili di esempio</span>
-                <ChevronDown className={`w-4 h-4 transition-transform ${showExamples ? "rotate-180" : ""}`} />
-              </button>
-              <div className={`space-y-2 ${showExamples ? "mt-3" : "hidden"}`}>
-                {DEMO_PROFILES.map((p, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => applyTemplate(idx)}
-                    className={`w-full text-left rounded-xl px-3.5 py-2.5 text-sm border transition-colors flex items-center justify-between gap-2 ${
-                      activeTemplate === idx ? "border-accent bg-accent/5 text-ink" : "border-line hover:bg-surface2"
-                    }`}
-                  >
-                    <span>{p.label}</span>
-                    <ArrowRight
-                      className={`w-4 h-4 shrink-0 ${activeTemplate === idx ? "text-accent" : "text-faint"}`}
-                    />
-                  </button>
-                ))}
-              </div>
             </div>
+            )}
 
+            {mode === "bio" && (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-line bg-surface shadow-soft p-6 space-y-3">
+                <h2 className="font-display text-lg font-bold">Analizza una biografia</h2>
+                <p className="text-sm text-muted">
+                  Incolla il testo che vorresti mettere nella tua bio: viene analizzato per rilevare i dati
+                  personali esposti e stimarne il rischio — senza pubblicarlo davvero.
+                </p>
+                <form onSubmit={handleAnalyzeBio} className="space-y-3">
+                  <textarea
+                    aria-label="Testo della biografia"
+                    rows={7}
+                    value={scrapedContent}
+                    onChange={(e) => setScrapedContent(e.target.value)}
+                    placeholder="Es. Studente di Ingegneria a Cosenza, nato il 12/05/1999. Scrivimi a mario.rossi@example.com"
+                    className="w-full rounded-xl border border-line bg-bg p-3.5 text-sm leading-relaxed placeholder:text-faint focus:outline-none focus:border-accent transition-colors resize-y"
+                  />
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={handleClear}
+                      disabled={isLoading}
+                      className="w-1/3 rounded-xl border border-line py-2.5 text-sm font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Pulisci
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-2/3 rounded-xl bg-accent text-accentink py-2.5 text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-60 shadow-soft"
+                    >
+                      {isLoading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Analisi in corso…
+                        </>
+                      ) : (
+                        <>
+                          Analizza biografia
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Esempi di biografia pronti (collassabili, chiusi di default) */}
+              <div className="rounded-2xl border border-line bg-surface shadow-soft p-6">
+                <button
+                  type="button"
+                  onClick={() => setShowExamples((v) => !v)}
+                  className="w-full flex items-center justify-between text-[11px] uppercase tracking-wider text-muted font-semibold hover:text-ink transition-colors"
+                >
+                  <span>Esempi di biografia</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showExamples ? "rotate-180" : ""}`} />
+                </button>
+                <div className={`space-y-2 ${showExamples ? "mt-3" : "hidden"}`}>
+                  {DEMO_PROFILES.map((p, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => applyTemplate(idx)}
+                      className={`w-full text-left rounded-xl px-3.5 py-2.5 text-sm border transition-colors flex items-center justify-between gap-2 ${
+                        activeTemplate === idx ? "border-accent bg-accent/5 text-ink" : "border-line hover:bg-surface2"
+                      }`}
+                    >
+                      <span>{p.label}</span>
+                      <ArrowRight
+                        className={`w-4 h-4 shrink-0 ${activeTemplate === idx ? "text-accent" : "text-faint"}`}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             )}
 
@@ -718,7 +775,7 @@ export default function App() {
                   <label className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-muted py-10 text-sm font-semibold hover:text-ink hover:border-accent hover:bg-surface2 cursor-pointer transition-colors">
                     <ScanText className="w-6 h-6" />
                     Carica immagine
-                    <span className="text-xs font-normal text-faint">PNG o JPEG · max 8 MB</span>
+                    <span className="text-xs font-normal text-faint">PNG o JPEG · max 5 MB</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -1014,6 +1071,8 @@ export default function App() {
                   <p className="text-sm text-muted max-w-sm mx-auto mt-1.5 leading-relaxed">
                     {mode === "profile"
                       ? "Inserisci un profilo a sinistra — o scegli un profilo di esempio — e avvia l'analisi per vedere qui il verdetto, i dati esposti e i possibili attacchi."
+                      : mode === "bio"
+                      ? "Incolla il testo di una biografia a sinistra e avvia l'analisi: qui vedrai il verdetto, i dati personali esposti e i possibili attacchi."
                       : "Carica un'immagine a sinistra: qui vedrai il verdetto, i dati personali estratti dal testo visibile e i possibili attacchi."}
                   </p>
                 </div>
