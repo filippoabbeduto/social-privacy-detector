@@ -84,10 +84,13 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      # Certificati self-signed: il nginx.conf ora fa TLS termination su 443.
-      # Genera i cert in ./certs prima di 'up' (vedi README/comando openssl),
-      # altrimenti il container nginx non parte.
-      - ./certs:/etc/nginx/certs:ro
+      # In produzione nginx.conf usa i certificati Let's Encrypt in
+      # /etc/letsencrypt/live/social-privacy-detector.it/. In locale non esistono:
+      # montiamo i self-signed (./certs) SU quei percorsi, così lo stesso nginx.conf
+      # funziona anche in sviluppo (il browser mostra solo l'avviso di cert non
+      # attendibile, la cifratura è reale). Genera i cert in ./certs prima di 'up'.
+      - ./certs/selfsigned.crt:/etc/letsencrypt/live/social-privacy-detector.it/fullchain.pem:ro
+      - ./certs/selfsigned.key:/etc/letsencrypt/live/social-privacy-detector.it/privkey.pem:ro
     # Fix resilienza: il reverse proxy parte quando il frontend è avviato e il
     # backend è SANO. Così il singolo entrypoint (porta 80) non inizia a
     # instradare traffico prima che i servizi a valle siano pronti.

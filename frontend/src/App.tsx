@@ -408,6 +408,10 @@ export default function App() {
   const selectMode = (m: "profile" | "bio" | "image") => {
     if (m === mode) return;
     setMode(m);
+    // Azzera un eventuale errore della modalità precedente (es. "manca la
+    // biografia"): non ha senso mostrarlo nelle altre sezioni. Il report, invece,
+    // resta visibile finché non parte una nuova analisi.
+    setError(null);
   };
 
   // Scarica l'ultimo report come PDF (nessun login: l'utente conserva in locale
@@ -630,7 +634,7 @@ export default function App() {
             <form onSubmit={handleAnalyze} className="rounded-2xl border border-line bg-surface shadow-soft p-6 space-y-5">
               <div className="space-y-2">
                 <label htmlFor="social-url" className="block text-sm font-semibold">
-                  Profilo social <span className="text-faint font-normal">(obbligatorio)</span>
+                  Profilo social
                 </label>
                 <div className="relative">
                   <Search className="w-4 h-4 text-faint absolute left-3.5 top-1/2 -translate-y-1/2" />
