@@ -38,8 +38,12 @@ class ReportGeneratorService:
         self.report_provider = os.getenv("REPORT_PROVIDER", "gemini").lower()
 
         if self.report_provider == "gemini":
-            self.llm_base_url = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
-            self.llm_model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
+            # NB: si usa "os.getenv(...) or default" e NON "os.getenv(name, default)":
+            # il compose passa LLM_BASE_URL/LLM_MODEL come stringa VUOTA (${VAR:-}),
+            # quindi la variabile ESISTE ed è "" → il secondo argomento di getenv non
+            # scatterebbe. Con "or" la stringa vuota (falsy) ricade sul default.
+            self.llm_base_url = (os.getenv("LLM_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai/").strip()
+            self.llm_model = (os.getenv("LLM_MODEL") or "gemini-2.5-flash").strip()
             self.llm_api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY", "")).strip()
         else:
             # Generico OpenAI-compatible (es. DeepSeek, OpenAI): tutto da env.

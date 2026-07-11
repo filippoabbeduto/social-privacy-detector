@@ -254,6 +254,9 @@ export default function App() {
   // Modalità di analisi selezionabile dalla navbar: "profile" (URL + bio) oppure
   // "image" (upload di una foto, controllo pre-pubblicazione via OCR Textract).
   const [mode, setMode] = useState<"profile" | "image">("profile");
+  // Immagine selezionata ma NON ancora analizzata: l'analisi parte solo al click
+  // esplicito su "Analizza", non alla semplice selezione del file.
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Ferma il polling in corso. Centralizzato perché serve a più handler
@@ -367,13 +370,12 @@ export default function App() {
     }
   };
 
-  // Cambio modalità (Profilo/Immagine): azzera la vista risultati — un'analisi
-  // del profilo precedente non ha senso nella sezione immagini e viceversa.
+  // Cambio modalità (Profilo/Immagine): cambia SOLO l'input mostrato a sinistra.
+  // L'ultimo report a destra NON viene azzerato: resta visibile finché non parte
+  // una nuova analisi (profilo o immagine) o non si chiude/aggiorna l'app.
   const selectMode = (m: "profile" | "image") => {
     if (m === mode) return;
-    stopPolling();
     setMode(m);
-    resetOutcome();
   };
 
   // Scarica l'ultimo report come PDF (nessun login: l'utente conserva in locale
@@ -472,6 +474,7 @@ export default function App() {
     setActiveTemplate(null);
     setShowBio(false);
     setShowExamples(false);
+    setImageFile(null);
     resetOutcome();
   };
 
@@ -691,28 +694,69 @@ export default function App() {
                   Carica uno screenshot o la foto di un documento: il testo visibile viene estratto con OCR
                   (Amazon Textract) e analizzato per rilevare eventuali dati personali esposti.
                 </p>
-                <label
-                  className={`flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-10 text-sm font-semibold transition-colors ${
-                    isLoading
-                      ? "border-line text-faint cursor-not-allowed"
-                      : "border-line text-muted hover:text-ink hover:border-accent hover:bg-surface2 cursor-pointer"
-                  }`}
-                >
-                  <ScanText className="w-6 h-6" />
-                  Carica immagine
-                  <span className="text-xs font-normal text-faint">PNG o JPEG · max 8 MB</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    disabled={isLoading}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleImageUpload(f);
-                      e.target.value = ""; // consente di ricaricare lo stesso file
-                    }}
-                  />
-                </label>
+
+                {/* Selezione dell'immagine: alla selezione NON parte l'analisi, si
+                    memorizza soltanto il file; l'analisi parte al click su "Analizza". */}
+                {!imageFile ? (
+                  <label className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-muted py-10 text-sm font-semibold hover:text-ink hover:border-accent hover:bg-surface2 cursor-pointer transition-colors">
+                    <ScanText className="w-6 h-6" />
+                    Carica immagine
+                    <span className="text-xs font-normal text-faint">PNG o JPEG · max 8 MB</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setImageFile(f); // solo selezione, niente analisi automatica
+                        e.target.value = ""; // consente di riselezionare lo stesso file
+                      }}
+                    />
+                  </label>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Riquadro: conferma che l'immagine è stata caricata */}
+                    <div className="flex items-center gap-3 rounded-xl border border-line bg-surface2 p-3.5">
+                      <div className="grid place-items-center w-9 h-9 rounded-lg bg-accent/10 text-accent shrink-0">
+                        <ScanText className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold truncate">{imageFile.name}</div>
+                        <div className="text-xs text-muted">
+                          {(imageFile.size / 1024).toFixed(0)} KB · immagine caricata
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setImageFile(null)}
+                        disabled={isLoading}
+                        aria-label="Rimuovi immagine"
+                        className="grid place-items-center w-8 h-8 rounded-lg border border-line text-muted hover:text-high hover:bg-surface transition-colors disabled:opacity-50 shrink-0"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {/* Bottone esplicito: fa partire l'analisi */}
+                    <button
+                      type="button"
+                      onClick={() => handleImageUpload(imageFile)}
+                      disabled={isLoading}
+                      className="w-full rounded-xl bg-accent text-accentink py-2.5 text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-60 shadow-soft"
+                    >
+                      {isLoading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Analisi in corso…
+                        </>
+                      ) : (
+                        <>
+                          Analizza immagine
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
