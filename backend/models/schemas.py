@@ -17,7 +17,7 @@ class ProfileAnalysisRequest(BaseModel):
     # forma corretta e compare comunque nella documentazione Swagger /api/docs.
     social_url: str = Field(
         ...,
-        description="URL del profilo social da analizzare (es. Instagram o LinkedIn)",
+        description="URL del profilo social da analizzare (es. Instagram, TikTok o Facebook)",
         examples=["https://instagram.com/filippo_abbeduto_99"]
     )
     scraped_content: Optional[str] = Field(

@@ -5,7 +5,6 @@
 # Architettura asincrona:
 #   POST /api/analyze     → Crea job PENDING, accoda lavoro, risponde 202
 #   GET  /api/analysis/id → Polling dello stato (PENDING → PROCESSING → COMPLETED)
-#   GET  /api/analyses    → Lista storico analisi
 #
 # Il worker gira SEMPRE in-process come thread daemon (sia in mock sia in
 # produzione): il backend FastAPI è un server persistente su EC2, quindi non

@@ -3,7 +3,7 @@
 # preflight.py - Verifica connettivita AWS prima del test end-to-end reale.
 # Controlla: credenziali IAM, tabella DynamoDB, bucket S3, e supporto lingua
 # di Comprehend DetectPiiEntities (inglese vs italiano).
-# NON invoca Bedrock (evita costi token). Comprehend costa ~pochi centesimi.
+# NON invoca l'LLM di generazione report (evita costi token). Comprehend costa ~pochi centesimi.
 # Uso: .venv/bin/python preflight.py
 # ==============================================================================
 

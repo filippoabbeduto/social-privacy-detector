@@ -92,8 +92,12 @@ social-privacy-detector/
 │   │   ├── scraper.py          # Scraping social (Apify)
 │   │   └── storage.py          # Persistenza (DynamoDB+S3 / in-memory mock)
 │   └── tests/                  # Suite pytest (15 test)
-├── docker-compose.yml          # Orchestrazione 3 container
+├── docs/
+│   └── REGISTRO_SVILUPPO_AI.md # Registro dello sviluppo assistito da IA
+├── docker-compose.yml          # Orchestrazione 3 container (sviluppo)
+├── docker-compose.prod.yml     # Orchestrazione produzione (immagini ECR)
 ├── nginx.conf                  # Reverse proxy principale
+├── preflight.py                # Verifica connettività AWS pre-test
 ├── .env.example
 ├── .gitignore
 └── README.md
