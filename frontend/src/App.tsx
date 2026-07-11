@@ -398,6 +398,11 @@ export default function App() {
   // Analisi da immagine: carica il file su /api/analyze-image (OCR Textract lato
   // backend), poi riusa lo stesso polling del flusso testuale.
   const handleImageUpload = async (file: File) => {
+    // Rilascia l'anteprima precedente (object URL) prima di crearne una nuova,
+    // così i blob delle immagini analizzate in precedenza non restano orfani in
+    // memoria del browser.
+    const prev = states.image.source;
+    if (prev?.kind === "image") URL.revokeObjectURL(prev.preview);
     patchState("image", {
       loading: true, error: null, result: null, jobStatus: "PENDING",
       source: { kind: "image", name: file.name, preview: URL.createObjectURL(file) },
