@@ -62,9 +62,12 @@ storage_service = StorageService()
 MAX_POST_IMAGES_OCR = int(os.getenv("MAX_POST_IMAGES_OCR", "5"))
 
 # Tetto di dimensione per le immagini analizzate (upload utente e download dai post).
-# Textract (sincrono) accetta fino a ~10 MB: teniamo un margine e blocchiamo prima di
-# caricare in memoria un file arbitrariamente grande (difesa anti-DoS).
-MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+# Sia Textract (DetectDocumentText) sia Rekognition (DetectLabels), quando l'immagine
+# è inviata come byte grezzi (non via S3), accettano al massimo 5 MB: superarli fa
+# fallire ENTRAMBI i servizi. Blocchiamo quindi a 5 MB — così un file troppo grande
+# viene respinto subito con un messaggio corretto, invece di fallire dopo con un 422
+# fuorviante. Vale anche come difesa anti-DoS (non si carica in memoria un file enorme).
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB (limite dei byte grezzi per Textract/Rekognition)
 
 
 def _is_public_https_url(url: str) -> bool:
@@ -372,7 +375,7 @@ async def analyze_image(file: UploadFile = File(...)):
     if len(image_bytes) > MAX_IMAGE_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Immagine troppo grande (max 8 MB).",
+            detail="Immagine troppo grande (max 5 MB).",
         )
 
     # Due segnali complementari sull'immagine: testo visibile (Textract/OCR) ed

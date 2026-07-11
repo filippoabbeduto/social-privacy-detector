@@ -19,10 +19,15 @@ _PNG_1x1 = bytes.fromhex(
 )
 
 
+# Immagine "reale" per il test: il PNG minimo + padding oltre la soglia di 2 KB del
+# mock Rekognition, così restituisce etichette (un'immagine minima non ne produrrebbe).
+_PNG_REALISTIC = _PNG_1x1 + b"\x00" * 4096
+
+
 def test_analyze_image_accoda_e_completa():
     """Upload immagine -> 202 con analysis_id -> polling fino a COMPLETED, con
     etichette visive (Rekognition) presenti nel risultato."""
-    r = client.post("/api/analyze-image", files={"file": ("test.png", _PNG_1x1, "image/png")})
+    r = client.post("/api/analyze-image", files={"file": ("test.png", _PNG_REALISTIC, "image/png")})
     assert r.status_code == 202
     jid = r.json()["analysis_id"]
 
@@ -43,3 +48,20 @@ def test_analyze_image_rifiuta_non_immagine():
     """Un file non-immagine viene respinto con 415."""
     r = client.post("/api/analyze-image", files={"file": ("note.txt", b"solo testo", "text/plain")})
     assert r.status_code == 415
+
+
+def test_immagine_minima_niente_etichette_fittizie():
+    """Un'immagine minima (1x1 px) non deve produrre etichette visive inventate:
+    il mock Rekognition sotto la soglia restituisce lista vuota."""
+    r = client.post("/api/analyze-image", files={"file": ("tiny.png", _PNG_1x1, "image/png")})
+    assert r.status_code == 202
+    jid = r.json()["analysis_id"]
+
+    result = None
+    for _ in range(15):
+        time.sleep(1)
+        result = client.get(f"/api/analysis/{jid}").json()
+        if result["status"] in ("COMPLETED", "FAILED"):
+            break
+    assert result["status"] == "COMPLETED"
+    assert result["image_labels"] == [], "un'immagine minima non deve avere etichette"

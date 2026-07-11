@@ -261,6 +261,12 @@ class PIIDetectorService:
         """
         if AWS_MOCK or not self.rekognition_client:
             logger.info("[MOCK Rekognition] Simulazione DetectLabels")
+            # Un'immagine vuota o minima (es. 1x1 px, ~poche decine di byte) non deve
+            # produrre etichette inventate: sotto una soglia di dimensione si
+            # restituisce lista vuota, così il ramo "nessun contenuto visivo" resta
+            # raggiungibile anche in mock e la demo non mostra un'esposizione fittizia.
+            if len(image_bytes) < 2048:
+                return []
             return [
                 {"name": "Beach", "confidence": 98.4},
                 {"name": "Person", "confidence": 96.1},
