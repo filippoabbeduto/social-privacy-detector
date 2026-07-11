@@ -93,13 +93,20 @@ interface AnalysisResult {
 
 // Le tre modalità di analisi, ognuna con il PROPRIO stato di risultato.
 type Mode = "profile" | "bio" | "image";
+// Oggetto su cui è stata avviata l'analisi (mostrato sopra i risultati):
+// il link del profilo, il testo della bio o l'anteprima dell'immagine.
+type Source =
+  | { kind: "profile"; url: string }
+  | { kind: "bio"; text: string }
+  | { kind: "image"; name: string; preview: string };
 interface ModeState {
   result: AnalysisResult | null;
   error: string | null;
   jobStatus: string | null;
   loading: boolean;
+  source: Source | null;
 }
-const EMPTY_STATE: ModeState = { result: null, error: null, jobStatus: null, loading: false };
+const EMPTY_STATE: ModeState = { result: null, error: null, jobStatus: null, loading: false, source: null };
 
 // Etichette leggibili + icona per ogni tipo di PII restituito dal backend.
 const PII_META: Record<string, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
@@ -281,7 +288,7 @@ export default function App() {
   const patchState = (m: Mode, p: Partial<ModeState>) =>
     setStates((s) => ({ ...s, [m]: { ...s[m], ...p } }));
   // Valori della modalità attualmente visualizzata (li usa la colonna dei risultati).
-  const { result, error, jobStatus, loading: isLoading } = states[mode];
+  const { result, error, jobStatus, loading: isLoading, source } = states[mode];
 
   // Ferma il polling in corso. Centralizzato perché serve a più handler
   // (cambio modalità, pulisci, esito COMPLETED/FAILED, smontaggio del componente).
@@ -332,7 +339,10 @@ export default function App() {
     e.preventDefault();
     // Campo vuoto: non si parte (il bottone è comunque disabilitato). Guardia.
     if (!socialUrl.trim()) return;
-    patchState("profile", { loading: true, error: null, result: null, jobStatus: "PENDING" });
+    patchState("profile", {
+      loading: true, error: null, result: null, jobStatus: "PENDING",
+      source: { kind: "profile", url: socialUrl.trim() },
+    });
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -362,7 +372,10 @@ export default function App() {
     // Testo vuoto: non si parte, senza mostrare errori (il bottone è comunque
     // disabilitato in questo caso; guardia di sicurezza, coerente con profilo/immagine).
     if (!scrapedContent.trim()) return;
-    patchState("bio", { loading: true, error: null, result: null, jobStatus: "PENDING" });
+    patchState("bio", {
+      loading: true, error: null, result: null, jobStatus: "PENDING",
+      source: { kind: "bio", text: scrapedContent.trim() },
+    });
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -385,7 +398,10 @@ export default function App() {
   // Analisi da immagine: carica il file su /api/analyze-image (OCR Textract lato
   // backend), poi riusa lo stesso polling del flusso testuale.
   const handleImageUpload = async (file: File) => {
-    patchState("image", { loading: true, error: null, result: null, jobStatus: "PENDING" });
+    patchState("image", {
+      loading: true, error: null, result: null, jobStatus: "PENDING",
+      source: { kind: "image", name: file.name, preview: URL.createObjectURL(file) },
+    });
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -867,6 +883,41 @@ export default function App() {
 
           {/* ── Colonna destra: risultati ───────────────────────────────────── */}
           <div className="lg:col-span-7 space-y-5">
+            {/* Oggetto dell'analisi corrente: link (profilo), testo (bio) o anteprima (immagine) */}
+            {source && (
+              <div className="rounded-2xl border border-line bg-surface shadow-soft p-5">
+                <div className="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2.5">
+                  Analisi di
+                </div>
+                {source.kind === "profile" && (
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 text-sm font-mono text-accent break-all hover:underline"
+                  >
+                    <Link2 className="w-4 h-4 shrink-0" />
+                    {source.url}
+                  </a>
+                )}
+                {source.kind === "bio" && (
+                  <p className="text-sm text-muted leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto">
+                    {source.text}
+                  </p>
+                )}
+                {source.kind === "image" && (
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={source.preview}
+                      alt={source.name}
+                      className="w-16 h-16 rounded-lg object-cover border border-line shrink-0"
+                    />
+                    <span className="text-sm font-mono text-muted break-all">{source.name}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {error && (
               <div className="rounded-2xl border border-high/40 bg-high/10 shadow-soft p-5 flex gap-3 items-start" role="alert">
                 <AlertTriangle className="w-5 h-5 text-high shrink-0 mt-0.5" />
@@ -962,9 +1013,6 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="mt-5 pt-4 border-t border-line text-[11px] font-mono text-faint break-all">
-                    Profilo analizzato: <span className="text-muted">{result.social_url}</span>
-                  </div>
                 </div>
 
                 {/* Sintesi narrativa generata dall'AI (quali dati esposti, pattern, perché) */}
