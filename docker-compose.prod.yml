@@ -75,9 +75,9 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      # Certificati self-signed generati sull'host (EC2). Il nginx.conf li richiede
-      # in /etc/nginx/certs: senza, il container nginx non parte.
-      - ./certs:/etc/nginx/certs:ro
+      # Certificati Let's Encrypt (CA pubblica), ottenuti con Certbot sull'host EC2.
+      # Il nginx.conf punta a /etc/letsencrypt/live/social-privacy-detector.it/.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       frontend:
         condition: service_started
