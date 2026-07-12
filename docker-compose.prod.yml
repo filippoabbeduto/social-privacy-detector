@@ -43,6 +43,11 @@ services:
     environment:
       - ENV=${ENV:-production}
       - AWS_MOCK=${AWS_MOCK:-false}
+      # Modalità worker: inprocess (default) | sqs (produttore: invia i job a SQS,
+      # la Lambda li consuma). Attivare mettendo WORKER_MODE=sqs + SQS_QUEUE_URL
+      # (output QueueUrl dello stack CloudFormation) in .env.production.
+      - WORKER_MODE=${WORKER_MODE:-inprocess}
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL:-}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
       - DYNAMODB_TABLE=${DYNAMODB_TABLE:-SocialPrivacyAnalyses}
       - S3_BUCKET=${S3_BUCKET:-social-privacy-reports}

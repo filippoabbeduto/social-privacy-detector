@@ -1,0 +1,10 @@
+# Immagine Lambda-container: base ufficiale AWS (include il Runtime Interface
+# Client, necessario per far girare il codice come funzione Lambda) + il codice
+# backend. Si usa l'immagine container invece dello zip perché il progetto ha
+# dipendenze relativamente pesanti (boto3, fastapi, ecc.) e questo è il metodo
+# AWS ufficiale per pacchettizzarle. CMD = handler della funzione.
+FROM public.ecr.aws/lambda/python:3.12
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
+COPY . ${LAMBDA_TASK_ROOT}/
+CMD [ "lambda_handler.handler" ]

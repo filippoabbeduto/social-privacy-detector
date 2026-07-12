@@ -12,17 +12,10 @@
 # ==============================================================================
 
 import os
-import json
 import uuid
-import time
-import socket
 import logging
-import ipaddress
 import threading
-from typing import Optional, List, Tuple
-from urllib.parse import urlparse
-
-import requests
+from typing import Optional, List
 
 from fastapi import APIRouter, status, HTTPException, UploadFile, File
 
@@ -31,277 +24,66 @@ from models.schemas import (
     AnalysisJobResponse,
     AnalysisReportResponse,
 )
-from services.pii_detector import PIIDetectorService
-from services.report_generator import ReportGeneratorService
-from services.scraper import ScraperService
-from services.storage import StorageService
-from services.risk_scorer import build_risk_assessment
+# La pipeline e i singleton dei servizi vivono ora in services/pipeline.py, così
+# da essere riusati identici sia dal thread in-process sia dalla Lambda (SQS).
+# Qui importiamo solo ciò che serve al router: la funzione di analisi, i due
+# servizi usati direttamente dagli endpoint e il limite dimensione immagine.
+from services.pipeline import (
+    run_analysis, storage_service, pii_service, MAX_IMAGE_BYTES,
+)
+from services import queue
 
 logger = logging.getLogger("social-privacy-backend")
 
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
 
+# Modalità del worker che esegue la pipeline:
+#   inprocess (default): thread daemon nello stesso processo FastAPI (locale/mock)
+#   sqs: l'API fa da produttore, invia il job a una coda SQS e una Lambda lo consuma
+# Selezione via env: nessuna modifica al client (fa sempre polling sul risultato).
+WORKER_MODE = os.getenv("WORKER_MODE", "inprocess").lower()
+
 router = APIRouter(prefix="/api", tags=["Analysis"])
 
-pii_service     = PIIDetectorService()
-report_service  = ReportGeneratorService()
-scraper_service = ScraperService()
-storage_service = StorageService()
-
 
 # ──────────────────────────────────────────────────────────────────────────────
-# BACKGROUND WORKER: esegue la pipeline di analisi in un thread separato.
-# Gira in-process sul backend FastAPI persistente (stesso comportamento in
-# mock e in produzione) — nessuna Lambda coinvolta.
+# ACCODAMENTO DEL LAVORO: produttore della pipeline asincrona.
+# Due modalità selezionabili via WORKER_MODE (vedi _enqueue_job): thread
+# in-process (locale/mock) oppure coda SQS + Lambda (produzione distribuita).
+# La pipeline vera e propria vive in services/pipeline.run_analysis.
 # ──────────────────────────────────────────────────────────────────────────────
-
-# Numero massimo di immagini dei post su cui fare OCR (Textract) durante l'analisi
-# di un profilo. LIMITE ESSENZIALE PER I COSTI: senza, un profilo con migliaia di
-# post scaricherebbe e analizzerebbe ogni foto, esaurendo credito Apify/Textract.
-# Configurabile via env; default prudente.
-MAX_POST_IMAGES_OCR = int(os.getenv("MAX_POST_IMAGES_OCR", "5"))
-
-# Tetto di dimensione per le immagini analizzate (upload utente e download dai post).
-# Sia Textract (DetectDocumentText) sia Rekognition (DetectLabels), quando l'immagine
-# è inviata come byte grezzi (non via S3), accettano al massimo 5 MB: superarli fa
-# fallire ENTRAMBI i servizi. Blocchiamo quindi a 5 MB — così un file troppo grande
-# viene respinto subito con un messaggio corretto, invece di fallire dopo con un 422
-# fuorviante. Vale anche come difesa anti-DoS (non si carica in memoria un file enorme).
-MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB (limite dei byte grezzi per Textract/Rekognition)
-
-
-def _is_public_https_url(url: str) -> bool:
-    """
-    Difesa anti-SSRF: accetta solo URL https il cui host NON risolve a un
-    indirizzo interno (privato, loopback, link-local — incluso l'endpoint di
-    metadata EC2 169.254.169.254 — riservato o multicast). Gli URL delle immagini
-    provengono dallo scraping e sono quindi input non fidato: senza questo filtro
-    il backend potrebbe essere indotto a interrogare servizi della rete interna.
-    ponytail: la risoluzione DNS avviene qui e la connessione dopo (piccola
-    finestra TOCTOU/DNS-rebinding); per il contesto del progetto è accettabile,
-    l'irrobustimento sarebbe pinnare l'IP validato sulla connessione.
-    """
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.hostname:
-        return False
-    try:
-        addrinfos = socket.getaddrinfo(parsed.hostname, None)
-    except Exception:
-        return False
-    for info in addrinfos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast):
-            return False
-    return True
-
-
-def _fetch_image_safely(url: str) -> Optional[bytes]:
-    """
-    Scarica un'immagine da un URL scrapato con difese anti-SSRF e anti-DoS:
-    solo https verso host pubblici (vedi _is_public_https_url), NESSUN redirect
-    (un redirect potrebbe puntare a un IP interno aggirando il primo controllo) e
-    tetto di dimensione MAX_IMAGE_BYTES applicato in streaming (evita di caricare
-    in memoria un file arbitrariamente grande). Ritorna i byte o None.
-    """
-    if not _is_public_https_url(url):
-        logger.warning(f"[Textract] URL immagine rifiutato (guardia SSRF): {url[:60]}")
-        return None
-    try:
-        with requests.get(url, timeout=15, stream=True, allow_redirects=False) as resp:
-            if not resp.ok:
-                return None
-            data = bytearray()
-            for chunk in resp.iter_content(64 * 1024):
-                data.extend(chunk)
-                if len(data) > MAX_IMAGE_BYTES:
-                    logger.warning(f"[Textract] Immagine oltre il limite, scartata: {url[:60]}")
-                    return None
-            return bytes(data) or None
-    except Exception as e:
-        logger.warning(f"[Textract] Download immagine fallito ({url[:60]}...): {e}")
-        return None
-
-
-def _process_post_images(image_urls: List[str]) -> Tuple[List[str], List[dict]]:
-    """
-    Scarica le prime MAX_POST_IMAGES_OCR immagini dei post (in modo sicuro, vedi
-    _fetch_image_safely) e ne ricava due segnali: il testo visibile via Amazon
-    Textract (OCR retrospettivo) e le etichette visive via Amazon Rekognition
-    (oggetti/scene/luoghi). Cattura sia le PII testuali dentro le foto sia
-    l'esposizione visiva (dove/cosa mostra la foto). Ogni immagine è indipendente:
-    un errore o uno scarto su una non blocca le altre.
-    """
-    texts: List[str] = []
-    labels: List[dict] = []
-    for url in image_urls[:MAX_POST_IMAGES_OCR]:
-        content = _fetch_image_safely(url)
-        if not content:
-            continue
-        extracted = pii_service.extract_text_from_image(content)
-        if extracted and extracted.strip():
-            texts.append(extracted.strip())
-        labels.extend(pii_service.detect_image_labels(content))
-    if texts:
-        logger.info(f"[Textract] OCR post: testo estratto da {len(texts)} immagini.")
-    if labels:
-        logger.info(f"[Rekognition] Etichette visive dai post: {len(labels)} totali.")
-    return texts, _dedupe_labels(labels)
-
-
-def _dedupe_labels(labels: List[dict]) -> List[dict]:
-    """
-    Deduplica le etichette visive per nome (tenendo la confidenza più alta) e le
-    ordina per confidenza decrescente: più immagini possono produrre la stessa
-    etichetta (es. 'Beach') e non ha senso ripeterla nel report.
-    """
-    best: dict = {}
-    for lbl in labels:
-        name = lbl["name"]
-        if name not in best or lbl["confidence"] > best[name]["confidence"]:
-            best[name] = lbl
-    return sorted(best.values(), key=lambda l: l["confidence"], reverse=True)
-
-
-def _run_analysis_pipeline(analysis_id: str, social_url: str, scraped_content: Optional[str],
-                           image_labels: Optional[List[dict]] = None):
-    """
-    Worker che esegue l'intera pipeline di analisi in un thread daemon.
-    Stesso codice in mock e in produzione: cambia solo la sorgente dati
-    (mock regex/bio simulate vs servizi AWS reali via Boto3), non l'orchestrazione.
-
-    Pipeline:
-      1. Aggiorna stato → PROCESSING
-      2. Scraping del profilo (Apify / mock)
-      3. Estrazione PII (Comprehend / Regex)
-      4. Deduplicazione PII per il report
-      5. Generazione report minacce (Gemini / mock)
-      6. Calcolo risk score (feature engineering)
-      7. Salvataggio risultati → COMPLETED
-    """
-    try:
-        # Aggiorna stato a PROCESSING
-        storage_service.update_status(analysis_id, "PROCESSING")
-        logger.info(f"[Worker] Pipeline avviata per job {analysis_id}")
-
-        # Simula latenza di elaborazione in mock mode per testare il polling
-        if AWS_MOCK:
-            time.sleep(3)
-
-        # Step 1: Scraping del profilo. Se il client non fornisce già il testo,
-        # lo recuperiamo via scraper. In modalità reale uno scrape fallito
-        # (profilo privato/inesistente/irraggiungibile, piattaforma non supportata)
-        # restituisce None: in quel caso NON proseguiamo l'analisi su dati inventati
-        # — segnaliamo il job come FAILED con un messaggio chiaro. Analizzare una
-        # bio mock riporterebbe PII false come reali (problema di integrità dati).
-        # image_labels valorizzato (anche lista vuota) ⇒ è un job da IMMAGINE
-        # caricata: le etichette visive arrivano già dall'endpoint e NON si fa
-        # scraping anche se il testo OCR è vuoto (una foto può non avere testo).
-        is_image_job = image_labels is not None
-        target_text = scraped_content
-        if not target_text and not is_image_job:
-            target_text, image_urls = scraper_service.scrape_profile_with_images(social_url)
-            if not target_text or not target_text.strip():
-                logger.warning(
-                    f"[Worker] Scraping senza dati per {social_url}: profilo non accessibile."
-                )
-                storage_service.fail_job(
-                    analysis_id,
-                    "Profilo non accessibile: potrebbe essere privato, inesistente o "
-                    "irraggiungibile, oppure la piattaforma non è supportata. "
-                    "Nessun dato da analizzare."
-                )
-                return
-
-            # Analisi delle immagini dei post (fino al limite configurato): il testo
-            # OCR viene aggiunto a quello analizzato (PII dentro le foto) e le
-            # etichette visive Rekognition alimentano l'esposizione visiva.
-            ocr_texts, image_labels = _process_post_images(image_urls)
-            if ocr_texts:
-                target_text += (
-                    "\n\n[Testo rilevato nelle immagini dei post]\n" + "\n".join(ocr_texts)
-                )
-
-        # Step 2: Estrazione PII (raw, con duplicati — servono allo scorer)
-        raw_piis = pii_service.detect_pii(target_text or "")
-
-        # Step 3: Deduplicazione per la risposta frontend e il report minacce
-        seen = set()
-        detected_piis = []
-        for entity in raw_piis:
-            key = (entity.type, entity.text.lower())
-            if key not in seen:
-                seen.add(key)
-                detected_piis.append(entity)
-
-        # Step 4: Generazione report (sintesi narrativa + vettori) su dati deduplicati.
-        # Le etichette visive (Rekognition) arricchiscono il prompt LLM: la sintesi e
-        # i vettori tengono conto anche dell'esposizione dedotta dalle immagini.
-        narrative_summary, social_threats = report_service.generate_report(detected_piis, image_labels)
-
-        # Step 5: Calcolo livello di rischio tramite feature engineering (su dati RAW)
-        risk_level, risk_explanation, risk_score, risk_motivations = build_risk_assessment(raw_piis)
-
-        # Step 6: Salvataggio risultati → COMPLETED
-        results = {
-            "detected_pii": [p.model_dump() for p in detected_piis],
-            "image_labels": image_labels or [],
-            "narrative_summary": narrative_summary,
-            "social_engineering_report": [t.model_dump() for t in social_threats],
-            "risk_assessment": {
-                "risk_level": risk_level,
-                "explanation": risk_explanation,
-                "score": risk_score,
-                "motivations": risk_motivations,
-            },
-            "risk_level": risk_level,
-            "risk_score": risk_score,
-            "pii_count": len(detected_piis),
-            "pii_types": list({p.type for p in detected_piis}),
-        }
-
-        # Step 6b: persistenza del report completo su S3. L'architettura del
-        # progetto prevede S3 come storage dei report; DynamoDB conserva metadati
-        # + risultati per la lettura diretta. Qui carichiamo il report JSON su S3 e
-        # salviamo la sua chiave nel record (prima era codice morto: upload_report
-        # esisteva ma non veniva mai invocato, quindi il bucket restava vuoto).
-        report_json = json.dumps(results, ensure_ascii=False, default=str)
-        s3_key = storage_service.upload_report(analysis_id, report_json)
-        if s3_key:
-            results["s3_report_key"] = s3_key
-
-        storage_service.complete_job(analysis_id, results)
-        logger.info(f"[Worker] Pipeline completata per job {analysis_id}. Rischio: {risk_level} ({risk_score}/100)")
-
-    except Exception as e:
-        logger.error(f"[Worker] Errore nella pipeline per job {analysis_id}: {e}")
-        storage_service.fail_job(analysis_id, str(e))
 
 
 def _enqueue_job(analysis_id: str, social_url: str, scraped_content: Optional[str],
                  image_labels: Optional[List[dict]] = None):
     """
-    Accoda il job per l'elaborazione asincrona.
+    Accoda il job per l'elaborazione asincrona (pattern produttore/consumatore).
 
-    SCELTA ARCHITETTURALE (coerente con il piano di progetto "no Lambda"):
-    l'elaborazione avviene SEMPRE in-process in un thread daemon, sia in mock
-    sia in produzione. Il backend FastAPI è un server PERSISTENTE che gira su
-    EC2, quindi può eseguire la pipeline in background da solo — senza bisogno
-    di una coda SQS + Lambda consumer.
+    Due modalità, scelte da WORKER_MODE:
+      - sqs (produzione): l'API è il PRODUTTORE; invia il job a una coda SQS e
+        una Lambda event-driven lo CONSUMA (disaccoppiamento, at-least-once +
+        idempotenza, DLQ, auto-scaling serverless). Ritorna subito.
+      - inprocess (default, locale/mock): la pipeline gira in un thread daemon
+        nello stesso processo FastAPI. Il backend su EC2 è persistente, quindi
+        può eseguirla in background senza infrastruttura aggiuntiva.
 
-    In precedenza, in produzione, questo metodo inviava il job a SQS: ma nel
-    progetto non esiste alcun consumer/Lambda che lo legga, quindi i messaggi
-    sarebbero rimasti inevasi (percorso rotto). Rimosso per coerenza.
-
-    [Estensione futura opzionale] Per mostrare un pattern distribuito
-    "producer/consumer" (tema SDCC), si potrebbe reintrodurre SQS AGGIUNGENDO
-    un worker consumer dedicato (container separato o Lambda). Sarebbe una
-    feature deliberata, non il default.
-
-    Il thread è daemon=True: non blocca lo shutdown del processo.
+    In entrambi i casi il client fa polling su GET /api/analysis/{id}: nessuna
+    differenza lato client. Il thread è daemon=True: non blocca lo shutdown.
     """
+    # Modalità distribuita: delega alla coda SQS (la consuma la Lambda).
+    if WORKER_MODE == "sqs":
+        queue.send_job({
+            "analysis_id": analysis_id,
+            "social_url": social_url,
+            "scraped_content": scraped_content,
+            "image_labels": image_labels,
+        })
+        logger.info(f"[SQS] Job {analysis_id} delegato alla Lambda via coda")
+        return
+
+    # Modalità in-process (default): esegue run_analysis in un thread daemon.
     worker_thread = threading.Thread(
-        target=_run_analysis_pipeline,
+        target=run_analysis,
         args=(analysis_id, social_url, scraped_content, image_labels),
         daemon=True,
     )

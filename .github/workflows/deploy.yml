@@ -15,22 +15,33 @@ env:
   AWS_REGION: us-east-1
   ECR_FRONTEND: social-privacy-frontend
   ECR_BACKEND: social-privacy-backend
+  ECR_LAMBDA: spd-lambda
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
+    # Permessi per l'autenticazione OIDC: id-token=write permette a GitHub di
+    # emettere il token OIDC che AWS scambia con credenziali temporanee del ruolo
+    # (niente chiavi AWS long-lived nei secret). contents=read per il checkout.
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       # 1. Checkout del codice sorgente
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Configurazione credenziali AWS
-      - name: Configure AWS Credentials
+      # 2. Autenticazione AWS via OIDC (OpenID Connect): nessuna chiave statica.
+      # GitHub presenta un token OIDC firmato, AWS lo verifica e assume il ruolo
+      # AWS_DEPLOY_ROLE_ARN restituendo credenziali TEMPORANEE. Piu' sicuro delle
+      # access key permanenti (che se trafugate restano valide finche' non revocate).
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-spd-deploy
           aws-region: ${{ env.AWS_REGION }}
 
       # 3. Login ad Amazon ECR
@@ -55,6 +66,29 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_BACKEND:latest -t $ECR_REGISTRY/$ECR_BACKEND:${{ github.sha }} ./backend
           docker push $ECR_REGISTRY/$ECR_BACKEND:latest
           docker push $ECR_REGISTRY/$ECR_BACKEND:${{ github.sha }}
+
+      # 5b. Build e Push immagine Lambda (consumatore SQS, WORKER_MODE=sqs).
+      # Stesso codice backend, entrypoint diverso (Dockerfile.lambda). Serve un
+      # repo ECR "spd-lambda" gia' creato.
+      - name: Build & Push Lambda Image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -f ./backend/Dockerfile.lambda -t $ECR_REGISTRY/$ECR_LAMBDA:latest -t $ECR_REGISTRY/$ECR_LAMBDA:${{ github.sha }} ./backend
+          docker push $ECR_REGISTRY/$ECR_LAMBDA:latest
+          docker push $ECR_REGISTRY/$ECR_LAMBDA:${{ github.sha }}
+
+      # 5c. Aggiorna il codice della Lambda con la nuova immagine.
+      # "|| true": al primo run (prima che lo stack CloudFormation crei la
+      # funzione SpdWorker) il comando fallirebbe; lo si ignora per non rompere
+      # la pipeline. Dai run successivi aggiorna davvero la funzione.
+      - name: Update Lambda function code
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          aws lambda update-function-code --function-name SpdWorker \
+            --image-uri $ECR_REGISTRY/$ECR_LAMBDA:${{ github.sha }} \
+            --region $AWS_REGION || true
 
       # 6. Deploy su EC2 via SSH
       - name: Deploy to EC2 Instance

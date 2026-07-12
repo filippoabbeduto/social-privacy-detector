@@ -1,0 +1,260 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Social Privacy Detector (SDCC) - Infrastruttura per l'elaborazione distribuita
+  produttore/consumatore: coda SQS + DLQ, funzione Lambda (container) che consuma
+  i job, ruolo IAM a privilegio minimo, dashboard e allarme CloudWatch con
+  notifica SNS. Provisioning come Infrastructure as Code (CloudFormation).
+
+# ------------------------------------------------------------------------------
+# Parametri: passati al deploy (l'immagine Lambda e i nomi delle risorse dati
+# esistenti). GeminiApiKey è NoEcho (segreto, non mostrato negli output/console).
+# ------------------------------------------------------------------------------
+Parameters:
+  ImageUri:
+    Type: String
+    Description: URI immagine ECR della Lambda (es. <acct>.dkr.ecr.us-east-1.amazonaws.com/spd-lambda:latest)
+  DynamoTableName:
+    Type: String
+    Default: SocialPrivacyAnalyses
+    Description: Nome della tabella DynamoDB dei job di analisi (gia' esistente)
+  S3BucketName:
+    Type: String
+    Default: social-privacy-reports
+    Description: Nome del bucket S3 dove salvare i report (gia' esistente)
+  GeminiApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key per il provider LLM del report (Google Gemini)
+  AlarmEmail:
+    Type: String
+    Default: ""
+    Description: Email opzionale per le notifiche di allarme (DLQ non vuota)
+
+# La sottoscrizione email all'SNS viene creata solo se AlarmEmail è valorizzata.
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
+
+Resources:
+
+  # ----------------------------------------------------------------------------
+  # Coda SQS principale + Dead-Letter Queue.
+  # VisibilityTimeout 360s >= timeout Lambda 300s: mentre la Lambda elabora un
+  # messaggio, questo resta invisibile e non viene riconsegnato ad altri worker.
+  # Dopo maxReceiveCount=3 tentativi falliti il messaggio (poison message) va in DLQ.
+  # ----------------------------------------------------------------------------
+  SpdDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: spd-jobs-dlq
+      MessageRetentionPeriod: 1209600  # 14 giorni: tempo per ispezionare i falliti
+
+  SpdJobsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: spd-jobs
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SpdDlq.Arn
+        maxReceiveCount: 3
+
+  # ----------------------------------------------------------------------------
+  # Ruolo IAM della Lambda: privilegio minimo. Solo le azioni che la pipeline usa
+  # davvero, ristrette per quanto possibile alle risorse specifiche (tabella,
+  # bucket, coda). CloudWatch Logs e PutMetricData per l'osservabilita'.
+  # ----------------------------------------------------------------------------
+  SpdWorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: spd-worker-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: spd-worker-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Consumo della coda: ricevere/cancellare i messaggi + leggere gli attributi.
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt SpdJobsQueue.Arn
+              # Persistenza dei job (record + claim idempotente) sulla tabella specifica.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoTableName}"
+              # Report su S3 (solo oggetti del bucket dei report).
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${S3BucketName}/*"
+              # Servizi AI managed usati dalla pipeline (solo le API effettivamente invocate).
+              - Effect: Allow
+                Action:
+                  - comprehend:DetectPiiEntities
+                  - textract:DetectDocumentText
+                  - rekognition:DetectLabels
+                Resource: "*"  # questi servizi non supportano restrizione per-risorsa
+              # Osservabilita': metriche custom + log della funzione.
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # ----------------------------------------------------------------------------
+  # Funzione Lambda (immagine container): il consumatore SQS della pipeline.
+  # AWS_MOCK=false attiva i client boto3 reali; le altre env allineano i nomi
+  # delle risorse dati e la config del report a quelli del backend.
+  # ----------------------------------------------------------------------------
+  SpdWorker:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: SpdWorker
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      Role: !GetAtt SpdWorkerRole.Arn
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          AWS_MOCK: "false"
+          WORKER_MODE: "sqs"
+          DYNAMODB_TABLE: !Ref DynamoTableName
+          S3_BUCKET: !Ref S3BucketName
+          REPORT_PROVIDER: "gemini"
+          GEMINI_API_KEY: !Ref GeminiApiKey
+          ENABLE_REKOGNITION: "true"
+
+  # Collega la coda alla Lambda (event source mapping). ReportBatchItemFailures
+  # abilita la partial batch response: solo i messaggi falliti tornano in coda.
+  SpdEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt SpdJobsQueue.Arn
+      FunctionName: !Ref SpdWorker
+      BatchSize: 5
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+  # ----------------------------------------------------------------------------
+  # Osservabilita': topic SNS per gli allarmi + allarme su DLQ non vuota.
+  # Un messaggio in DLQ significa che un job ha fallito 3 volte: va notificato.
+  # ----------------------------------------------------------------------------
+  SpdAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: spd-alarms
+
+  SpdAlarmEmailSub:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref SpdAlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  SpdDlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: spd-dlq-not-empty
+      AlarmDescription: Almeno un job e' finito in DLQ (fallito 3 volte)
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt SpdDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SpdAlarmTopic
+
+  # ----------------------------------------------------------------------------
+  # Dashboard CloudWatch: salute della pipeline a colpo d'occhio.
+  # Lambda (invocazioni/errori/durata), profondita' coda e DLQ, metriche custom.
+  # ----------------------------------------------------------------------------
+  SpdDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: SocialPrivacyDetector
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda: invocazioni / errori / durata",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "SpdWorker" ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "SpdWorker" ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "SpdWorker", { "stat": "Average" } ]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Profondita' coda e DLQ",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "spd-jobs" ],
+                  [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "spd-jobs-dlq" ]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "Pipeline: analisi avviate / completate / fallite",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "SocialPrivacyDetector", "AnalysisStarted" ],
+                  [ "SocialPrivacyDetector", "AnalysisCompleted" ],
+                  [ "SocialPrivacyDetector", "AnalysisFailed" ]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "Latenza pipeline (p50 / p99) e PII per analisi",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  [ "SocialPrivacyDetector", "PipelineLatencyMs", { "stat": "p50" } ],
+                  [ "SocialPrivacyDetector", "PipelineLatencyMs", { "stat": "p99" } ],
+                  [ "SocialPrivacyDetector", "PIICount", { "stat": "Average" } ]
+                ]
+              }
+            }
+          ]
+        }
+
+# ------------------------------------------------------------------------------
+# Output: URL della coda, da impostare come SQS_QUEUE_URL sul backend EC2
+# (insieme a WORKER_MODE=sqs) per attivare la modalita' distribuita.
+# ------------------------------------------------------------------------------
+Outputs:
+  QueueUrl:
+    Description: URL della coda SQS dei job (usalo come SQS_QUEUE_URL sul backend)
+    Value: !Ref SpdJobsQueue

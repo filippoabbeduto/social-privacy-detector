@@ -129,6 +129,45 @@ class StorageService:
         record["updated_at"] = datetime.now(timezone.utc).isoformat()
         return self._put_record(analysis_id, record)
 
+    def claim_job(self, analysis_id: str) -> bool:
+        """
+        Reclama un job per l'elaborazione portandolo PENDING -> PROCESSING in modo
+        ATOMICO. Ritorna True solo se lo stato era PENDING (claim riuscito), False
+        altrimenti (job inesistente, gia' in elaborazione o completato).
+        Serve all'idempotenza: SQS e' at-least-once e puo' consegnare lo stesso
+        messaggio piu' volte, ma solo il PRIMO claim procede; gli altri escono.
+        In mock l'atomicita' e' garantita dal lock; su DynamoDB da una update
+        condizionale (ConditionExpression) = concorrenza ottimistica lato DB.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        if AWS_MOCK or not self.dynamodb_table:
+            with self._mock_lock:
+                rec = self._mock_store.get(analysis_id)
+                if not rec or rec.get("status") != JOB_STATUS_PENDING:
+                    return False
+                rec["status"] = JOB_STATUS_PROCESSING
+                rec["updated_at"] = now
+                return True
+        try:
+            self.dynamodb_table.update_item(
+                Key={"analysis_id": analysis_id},
+                UpdateExpression="SET #s = :proc, updated_at = :now",
+                ConditionExpression="#s = :pending",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":proc": JOB_STATUS_PROCESSING,
+                    ":pending": JOB_STATUS_PENDING,
+                    ":now": now,
+                },
+            )
+            return True
+        except self.dynamodb_table.meta.client.exceptions.ConditionalCheckFailedException:
+            # Un altro consumatore ha gia' reclamato il job (stato != PENDING).
+            return False
+        except Exception as e:
+            logger.error(f"[DynamoDB] claim_job fallito per {analysis_id}: {e}")
+            return False
+
     def complete_job(self, analysis_id: str, results: Dict[str, Any]) -> bool:
         """
         Segna un job come COMPLETED e salva i risultati dell'analisi.
