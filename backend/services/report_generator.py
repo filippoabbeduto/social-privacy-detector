@@ -16,6 +16,34 @@ logger = logging.getLogger("social-privacy-backend")
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
 
 
+def _resolve_gemini_key() -> str:
+    """
+    Recupera la API key del report LLM senza tenerla in chiaro in produzione.
+    Ordine di risoluzione:
+      1. variabile d'ambiente diretta GEMINI_API_KEY / LLM_API_KEY (sviluppo/locale);
+      2. altrimenti Amazon SSM Parameter Store (SecureString), se ne è configurato
+         il NOME in GEMINI_API_KEY_SSM.
+    In produzione l'ambiente (file .env, config Lambda) contiene solo il NOME del
+    parametro: il valore è cifrato in SSM (KMS) e letto a runtime via IAM. Così la
+    chiave non compare in chiaro né nel file sull'EC2 né nella console Lambda.
+    Non solleva mai: se non trova nulla ritorna "" e il report ricade sul mock.
+    """
+    key = (os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY") or "").strip()
+    if key:
+        return key
+    param = os.getenv("GEMINI_API_KEY_SSM", "").strip()
+    if not param or AWS_MOCK:
+        return ""
+    try:
+        import boto3
+        region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        ssm = boto3.client("ssm", region_name=region)
+        return ssm.get_parameter(Name=param, WithDecryption=True)["Parameter"]["Value"].strip()
+    except Exception as e:
+        logger.error(f"[SSM] lettura chiave '{param}' fallita: {e}")
+        return ""
+
+
 class ReportGeneratorService:
     """
     Genera report di social engineering basati sulle PII rilevate.
@@ -40,7 +68,9 @@ class ReportGeneratorService:
             # scatterebbe. Con "or" la stringa vuota (falsy) ricade sul default.
             self.llm_base_url = (os.getenv("LLM_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai/").strip()
             self.llm_model = (os.getenv("LLM_MODEL") or "gemini-2.5-flash").strip()
-            self.llm_api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY", "")).strip()
+            # Chiave risolta via env diretta o SSM SecureString (vedi _resolve_gemini_key):
+            # in produzione NON è in chiaro, si legge cifrata da Parameter Store.
+            self.llm_api_key = _resolve_gemini_key()
         else:
             # Generico OpenAI-compatible (es. DeepSeek, OpenAI): tutto da env.
             self.llm_base_url = os.getenv("LLM_BASE_URL", "").strip()

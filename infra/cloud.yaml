@@ -21,11 +21,14 @@ Parameters:
     Type: String
     Default: social-privacy-reports
     Description: Nome del bucket S3 dove salvare i report (gia' esistente)
-  GeminiApiKey:
+  GeminiKeySsmParam:
     Type: String
-    Default: ""
-    NoEcho: true
-    Description: API key per il provider LLM del report (Google Gemini)
+    Default: "/spd/gemini-api-key"
+    Description: >
+      Nome del parametro SSM (SecureString) che contiene la API key Gemini. Il
+      template NON riceve la chiave in chiaro: solo il nome. Il valore cifrato va
+      creato una volta con: aws ssm put-parameter --name /spd/gemini-api-key
+      --type SecureString --value <chiave>
   AlarmEmail:
     Type: String
     Default: ""
@@ -105,6 +108,16 @@ Resources:
                   - textract:DetectDocumentText
                   - rekognition:DetectLabels
                 Resource: "*"  # questi servizi non supportano restrizione per-risorsa
+              # Lettura della API key Gemini da SSM Parameter Store (SecureString):
+              # GetParameter sul parametro specifico + Decrypt (chiave KMS gestita da AWS).
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GeminiKeySsmParam}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: "*"
               # Osservabilita': metriche custom + log della funzione.
               - Effect: Allow
                 Action:
@@ -139,7 +152,7 @@ Resources:
           DYNAMODB_TABLE: !Ref DynamoTableName
           S3_BUCKET: !Ref S3BucketName
           REPORT_PROVIDER: "gemini"
-          GEMINI_API_KEY: !Ref GeminiApiKey
+          GEMINI_API_KEY_SSM: !Ref GeminiKeySsmParam
           ENABLE_REKOGNITION: "true"
 
   # Collega la coda alla Lambda (event source mapping). ReportBatchItemFailures
