@@ -1450,20 +1450,60 @@ un moltiplicatore di produttività, non un sostituto del giudizio ingegneristico
 
 \subsection{Prompt significativi}
 \label{sec:prompt-usati}
-Come richiesto dalla traccia, si riportano i prompt più rilevanti impartiti all'assistente,
-con il compito a cui si riferiscono. Sono trascritti \emph{verbatim}: illustrano che è lo
-studente a definire obiettivo, vincoli e criteri di accettazione.
+Come richiesto dalla traccia, si riportano i prompt più rilevanti, di due nature distinte:
+le \textbf{direttive di sviluppo} impartite all'assistente (\emph{Claude Code}) durante la
+realizzazione del progetto, e i \textbf{prompt di sistema} che l'applicazione invia essa
+stessa agli LLM a runtime. Sono trascritti \emph{verbatim} e illustrano che è lo studente a
+definire obiettivo, vincoli e criteri di accettazione.
 
-\paragraph{Generazione del logo.} Prompt (verbatim):
-\begin{quote}\itshape
-``vorrei un logo che metta ansia al cliente sulle possibili esposizioni online, così da
-spingerlo ad utilizzare il mio tool. ma che metta sicurezza sull'utilizzo dello stesso.
-una dualità quindi tra paura dell'esposizione e sicurezza sull'applicazione''
+\paragraph{Direttive di sviluppo all'assistente.} Lo sviluppo è avvenuto in modo
+conversazionale: lo studente pone un obiettivo o un vincolo, l'assistente propone e realizza,
+lo studente valuta, corregge e collauda. Di seguito alcune direttive reali, rappresentative
+delle diverse attività (le decisioni, le funzionalità, le correzioni, la verifica).
+
+\emph{Decisione progettuale} --- delegare l'estrazione a un LLM con verifica deterministica:
+\begin{quote}\small\itshape
+``Visto che ho libertà sulle scelte progettuali e visto che presidio e comprehend presentano
+evidenti limiti anche con il post processing, ho pensato che sarebbe meglio delegare
+l'estrazione dei PII ad un LMM \dots con apposita verifica deterministica come post
+processing visto che l'LLM può avere allucinazioni.''
 \end{quote}
-La richiesta non è estetica ma retorica: il logo deve sostenere due messaggi opposti ---
-l'inquietudine per l'esposizione dei dati (che motiva l'uso dello strumento) e
-l'affidabilità dello strumento stesso. È la stessa tensione risolta nella palette, dove
-l'accento freddo (blu) è tenuto fuori dalla scala calda del rischio.
+seguita dall'affinamento verso l'\emph{ensemble}:
+\begin{quote}\small\itshape
+``e se facessimo un ibrido con uso simultaneo di presidio ed LLM per sopperire ai limiti di
+presidio+post processing?''
+\end{quote}
+
+\emph{Specifica di una funzionalità} --- il comportamento della bio sanificata:
+\begin{quote}\small\itshape
+``quando si sanifica la bio l'obiettivo non è per forza abbassare a 0 lo score, in
+determinate circostanze \dots si possono anche lasciare determinati dati, l'importante è che
+il rischio diventi basso''
+\end{quote}
+
+\emph{Correzione di un comportamento} --- la catena di fallback del report:
+\begin{quote}\small\itshape
+``per la sanitizzazione non passare ad ollama direttamente, imposta che se gemini non
+dovesse rispondere allora si chiede ad ollama''
+\end{quote}
+
+\emph{Verifica e controllo qualità} --- richieste esplicite di audit, senza le quali
+l'assistente non interviene:
+\begin{quote}\small\itshape
+``fai uno scan completo e verifica che tutte le nuove modifiche fatte non abbiano introdotto
+bug o falle di sicurezza''\\
+``voglio che mi assicuri che la relazione sia allineata ed aggiornata su tutto il progetto''
+\end{quote}
+
+\emph{Generazione del logo} --- una richiesta \emph{retorica}, non estetica:
+\begin{quote}\small\itshape
+``vorrei un logo che metta ansia al cliente sulle possibili esposizioni online, così da
+spingerlo ad utilizzare il mio tool. ma che metta sicurezza sull'utilizzo dello stesso. una
+dualità quindi tra paura dell'esposizione e sicurezza sull'applicazione''
+\end{quote}
+Il logo deve sostenere due messaggi opposti --- l'inquietudine per l'esposizione (che motiva
+l'uso dello strumento) e l'affidabilità dello strumento stesso: la stessa tensione risolta
+nella palette, dove l'accento freddo (blu) è tenuto fuori dalla scala calda del rischio.
 
 \paragraph{Prompt di sistema del codice.} Oltre alle direttive di sviluppo, il sistema
 contiene alcuni prompt \emph{a runtime}: sono la parte del progetto in cui lo studente ha
