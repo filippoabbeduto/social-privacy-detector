@@ -9,6 +9,8 @@
 
 Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'analisi dell'esposizione pubblica di dati personali (PII) sui social network, con valutazione dei rischi di privacy e social engineering.
 
+L'estrazione delle PII avviene con **Microsoft Presidio + spaCy italiano** (locale e deterministico, con post-processing dedicato per l'italiano); lo **score di rischio** è calcolato in codice deterministico con un modello **empirico** (rischio atteso = probabilità × impatto per ciascun vettore d'attacco, con pesi ancorati a report di settore — IC3, DBIR, Proofpoint — su framework NIST SP 800-30). L'AI generativa (Google Gemini) **spiega** i vettori d'attacco individuati dallo score, senza calcolarli.
+
 ## Architettura
 
 ```
@@ -23,9 +25,9 @@ Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'ana
                                             │ Boto3 SDK
                     ┌───────────────────────▼────────────────────┐
                     │            AWS Managed Services             │
-                    │ Comprehend │ Textract │ Rekognition │ DDB │ S3 │
+                    │ Textract │ Rekognition │ DynamoDB │ S3 │ (Comprehend opz.) │
                     └────────────────────────────────────────────┘
-              report: Google Gemini (LLM esterno, via HTTPS)
+       PII: Presidio + spaCy IT (locale, default)   ·   report: Google Gemini (HTTPS)
 ```
 
 | Layer | Tecnologia |
@@ -35,9 +37,11 @@ Applicazione cloud-based a microservizi per il monitoraggio, la raccolta e l'ana
 | Container | Docker + Docker Compose |
 | CI/CD | GitHub Actions → Amazon ECR → EC2 |
 | Hosting | Amazon EC2 (t3.micro) + Nginx (TLS su 443) |
-| PII Detection | Amazon Comprehend + Textract (mock locale via Regex) |
-| Analisi visiva | Amazon Rekognition (DetectLabels) — esposizione dalle immagini |
-| AI Report | Google Gemini (gemini-2.5-flash) — LLM esterno; mock locale deterministico |
+| Estrazione PII | **Presidio + spaCy `it_core_news_lg`** (+ recognizer per riferimenti familiari) (locale, deterministico, default) · **ensemble** (Presidio + LLM esterno con grounding: l'LLM aggiunge i fuzzy mancanti *e* verifica quelli del NER, opt-in) · Amazon Comprehend + post-processing · Regex — commutabili via `PII_PROVIDER` |
+| OCR immagini | Amazon Textract (`DetectDocumentText`) |
+| Analisi visiva | Amazon Rekognition: DetectLabels (esposizione) + DetectFaces solo AGE_RANGE (segnalazione minori) |
+| Modello di rischio | `empirical` (default): Rischio = Σ Pₐ·Iₐ con pesi da studi (IC3, DBIR, Proofpoint) su framework NIST SP 800-30 · `heuristic` — commutabili via `RISK_MODEL` |
+| AI Report | Google Gemini (gemini-2.5-flash) — spiega i vettori d'attacco calcolati dallo score. Catena di fallback se non risponde (es. quota giornaliera esaurita): LLM esterno via Ollama (`GEN_LLM_MODEL`) → mock locale deterministico |
 | Database | Amazon DynamoDB (mock locale in-memory) |
 | Storage | Amazon S3 (mock locale in-memory) |
 
@@ -85,14 +89,25 @@ social-privacy-detector/
 │   ├── models/
 │   │   └── schemas.py          # Modelli Pydantic (validazione I/O)
 │   ├── routers/
-│   │   └── analysis.py         # Endpoint REST (/api/analyze, /api/analyze-image, /api/analysis/{id}) + worker async
+│   │   └── analysis.py         # Endpoint REST (/api/analyze, /api/analyze-image, /api/rescore, /api/sanitize-bio, /api/leverage, /api/attack-example, /api/analysis/{id}) + worker async
 │   ├── services/
-│   │   ├── pii_detector.py     # PII (Comprehend/Regex) + OCR (Textract) + visione (Rekognition)
-│   │   ├── report_generator.py # Report AI + prompt engineering
-│   │   ├── risk_scorer.py      # Risk scoring (feature engineering)
+│   │   ├── pii_detector.py     # PII: dispatcher PII_PROVIDER (presidio/ensemble/comprehend/regex) + OCR (Textract) + visione (Rekognition)
+│   │   ├── pii_presidio.py     # Estrazione PII con Presidio + spaCy IT + recognizer custom + post-processing (default)
+│   │   ├── pii_llm.py          # Estrattore LLM (modalità ensemble) sui tipi fuzzy: grounding deterministico + verifica dei candidati NER
+│   │   ├── visual_exposure.py  # Classificazione etichette visive sensibili (minori/documenti/geolocalizzazione)
+│   │   ├── comuni.py           # Decodifica deterministica comune di nascita dal CF (tabella codici catastali)
+│   │   ├── report_generator.py # Report AI (spiega gli attacchi dello score) + prompt engineering + bio sanitizzata
+│   │   ├── attack_example.py   # Esempio didattico di messaggio d'attacco (LLM Ollama, on-demand)
+│   │   ├── risk_scorer.py      # Risk scoring: dispatcher RISK_MODEL + euristico + compressione + leva/bonifica
+│   │   ├── risk_empirical.py   # Modello di rischio empirico (Σ Pₐ·Iₐ, pesi da studi, NIST SP 800-30)
+│   │   ├── dossier.py          # Identità ricomposta dai frammenti PII (deterministica)
+│   │   ├── secret_resolver.py  # Risoluzione segreti: env → SSM SecureString
+│   │   ├── metrics.py          # Metriche custom CloudWatch (osservabilità)
+│   │   ├── queue.py            # Coda SQS (modalità worker distribuita)
+│   │   ├── pipeline.py         # Pipeline di analisi condivisa (thread in-process / Lambda)
 │   │   ├── scraper.py          # Scraping social (Apify)
 │   │   └── storage.py          # Persistenza (DynamoDB+S3 / in-memory mock)
-│   └── tests/                  # Suite pytest (15 test)
+│   └── tests/                  # Suite pytest (161 test)
 ├── docs/
 │   └── REGISTRO_SVILUPPO_AI.md # Registro dello sviluppo assistito da IA
 ├── docker-compose.yml          # Orchestrazione 3 container (sviluppo)
