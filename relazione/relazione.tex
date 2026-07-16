@@ -1382,9 +1382,10 @@ Il flusso di lavoro adottato è riconducibile a un modello di \emph{pair program
 cui lo studente definisce obiettivi, requisiti e vincoli, mentre l'assistente propone
 idee, alternative e bozze che lo studente seleziona, corregge e collauda.
 
-A garanzia di trasparenza, i prompt più significativi impartiti all'assistente sono
-riportati \emph{verbatim} in questa sezione (\S\ref{sec:prompt-usati}), insieme al compito
-a cui si riferiscono e alla motivazione tecnica delle scelte adottate.
+A garanzia di trasparenza, i prompt più significativi sono riportati nella
+\S\ref{sec:prompt-usati}, insieme al compito a cui si riferiscono e alla motivazione delle
+scelte: le direttive di sviluppo come esempi rappresentativi, i prompt di sistema
+dell'applicazione \emph{verbatim} dal codice.
 
 \subsection{Modalità d'uso}
 L'assistente è stato utilizzato in fasi ben distinte, sempre a partire da direttive
@@ -1453,57 +1454,59 @@ un moltiplicatore di produttività, non un sostituto del giudizio ingegneristico
 Come richiesto dalla traccia, si riportano i prompt più rilevanti, di due nature distinte:
 le \textbf{direttive di sviluppo} impartite all'assistente (\emph{Claude Code}) durante la
 realizzazione del progetto, e i \textbf{prompt di sistema} che l'applicazione invia essa
-stessa agli LLM a runtime. Sono trascritti \emph{verbatim} e illustrano che è lo studente a
-definire obiettivo, vincoli e criteri di accettazione.
+stessa agli LLM a runtime. Le prime sono riportate come \emph{esempi rappresentativi}
+(rielaborati per chiarezza dai numerosi scambi di una collaborazione condotta in linguaggio
+naturale); i secondi sono trascritti \emph{verbatim} dal codice sorgente.
 
-\paragraph{Direttive di sviluppo all'assistente.} Lo sviluppo è avvenuto in modo
-conversazionale: lo studente pone un obiettivo o un vincolo, l'assistente propone e realizza,
-lo studente valuta, corregge e collauda. Di seguito alcune direttive reali, rappresentative
-delle diverse attività (le decisioni, le funzionalità, le correzioni, la verifica).
+\paragraph{Direttive di sviluppo all'assistente.} Lo sviluppo ha seguito un modello di
+\emph{brainstorming guidato}: lo studente porta un'idea o un problema, ragiona con
+l'assistente sulle alternative, poi \emph{decide} e impartisce la direzione operativa;
+l'assistente propone e realizza, lo studente valuta e collauda. Gli esempi seguenti
+illustrano questo ruolo di guida nelle diverse fasi.
 
-\emph{Decisione progettuale} --- delegare l'estrazione a un LLM con verifica deterministica:
+\emph{Brainstorming di una scelta progettuale} --- dall'idea alla soluzione ibrida:
 \begin{quote}\small\itshape
-``Visto che ho libertà sulle scelte progettuali e visto che presidio e comprehend presentano
-evidenti limiti anche con il post processing, ho pensato che sarebbe meglio delegare
-l'estrazione dei PII ad un LMM \dots con apposita verifica deterministica come post
-processing visto che l'LLM può avere allucinazioni.''
-\end{quote}
-seguita dall'affinamento verso l'\emph{ensemble}:
-\begin{quote}\small\itshape
-``e se facessimo un ibrido con uso simultaneo di presidio ed LLM per sopperire ai limiti di
-presidio+post processing?''
+``Presidio e Comprehend, anche con il post-processing, mostrano limiti evidenti sui nomi e
+sui luoghi italiani. Ragioniamo su un'alternativa: e se delegassimo l'estrazione a un LLM,
+mettendogli però a valle una verifica deterministica contro le allucinazioni? Anzi:
+proviamo a usarli insieme, Presidio e LLM in \emph{ensemble}, così ciascuno copre i limiti
+dell'altro. Prima di scrivere codice, dimmi vantaggi e svantaggi.''
 \end{quote}
 
-\emph{Specifica di una funzionalità} --- il comportamento della bio sanificata:
+\emph{Guida su una funzionalità} --- il criterio della bio sanificata:
 \begin{quote}\small\itshape
-``quando si sanifica la bio l'obiettivo non è per forza abbassare a 0 lo score, in
-determinate circostanze \dots si possono anche lasciare determinati dati, l'importante è che
-il rischio diventi basso''
+``Sulla bio sanificata voglio un comportamento preciso: l'obiettivo non è azzerare lo
+score. In un contesto lavorativo alcuni dati vanno lasciati esposti --- mi basta che il
+rischio scenda in fascia bassa. Imposta la bonifica per rimuovere il minimo necessario a
+raggiungere quella soglia, non di più.''
 \end{quote}
 
-\emph{Correzione di un comportamento} --- la catena di fallback del report:
+\emph{Direzione operativa} --- la catena di fallback del report:
 \begin{quote}\small\itshape
-``per la sanitizzazione non passare ad ollama direttamente, imposta che se gemini non
-dovesse rispondere allora si chiede ad ollama''
+``Per la generazione del report non passare a Ollama in modo diretto. Voglio una catena:
+prima si tenta Gemini e, solo se non risponde, si ricade su Ollama; in ultima istanza sul
+generatore deterministico. Applica la stessa logica ovunque venga usato un LLM.''
 \end{quote}
 
-\emph{Verifica e controllo qualità} --- richieste esplicite di audit, senza le quali
-l'assistente non interviene:
+\emph{Verifica e controllo qualità} --- gli audit richiesti esplicitamente prima di ogni
+avanzamento:
 \begin{quote}\small\itshape
-``fai uno scan completo e verifica che tutte le nuove modifiche fatte non abbiano introdotto
-bug o falle di sicurezza''\\
-``voglio che mi assicuri che la relazione sia allineata ed aggiornata su tutto il progetto''
+``Prima di procedere, fai uno scan completo del codice e verificami che le ultime modifiche
+non abbiano introdotto bug o falle di sicurezza.''\\
+``Voglio la certezza che la relazione sia allineata al progetto su ogni punto: controllala
+per intero e segnalami ogni incoerenza fra ciò che è scritto e ciò che il codice fa.''
 \end{quote}
 
-\emph{Generazione del logo} --- una richiesta \emph{retorica}, non estetica:
+\emph{Definizione di un requisito creativo} --- la generazione del logo, una richiesta
+\emph{retorica} prima che estetica:
 \begin{quote}\small\itshape
-``vorrei un logo che metta ansia al cliente sulle possibili esposizioni online, così da
-spingerlo ad utilizzare il mio tool. ma che metta sicurezza sull'utilizzo dello stesso. una
-dualità quindi tra paura dell'esposizione e sicurezza sull'applicazione''
+``Voglio un logo che trasmetta due sensazioni opposte insieme: l'inquietudine per la
+propria esposizione online, che spinga la persona a usare lo strumento, e allo stesso tempo
+l'affidabilità dello strumento stesso. Una dualità fra paura dell'esposizione e sicurezza
+dell'applicazione.''
 \end{quote}
-Il logo deve sostenere due messaggi opposti --- l'inquietudine per l'esposizione (che motiva
-l'uso dello strumento) e l'affidabilità dello strumento stesso: la stessa tensione risolta
-nella palette, dove l'accento freddo (blu) è tenuto fuori dalla scala calda del rischio.
+La stessa dualità è poi risolta anche nella palette, dove l'accento freddo (blu) è tenuto
+deliberatamente fuori dalla scala calda del rischio.
 
 \paragraph{Prompt di sistema del codice.} Oltre alle direttive di sviluppo, il sistema
 contiene alcuni prompt \emph{a runtime}: sono la parte del progetto in cui lo studente ha
