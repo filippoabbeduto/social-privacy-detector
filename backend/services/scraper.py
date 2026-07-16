@@ -23,6 +23,9 @@ logger = logging.getLogger("social-privacy-backend")
 
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
 
+# Email in un qualunque campo testuale del profilo (rete di sicurezza in _instagram_extract).
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CONFIGURAZIONE ACTOR APIFY PER PIATTAFORMA
@@ -58,6 +61,12 @@ def _register_platform(
 
 # ── INSTAGRAM ────────────────────────────────────────────────────────────────
 
+# Quanti post recenti leggere per le caption. Dopo la bio sono la sorgente piu'
+# ricca: i dati pesanti (date, indirizzi, codici) stanno li', perche' nei 150
+# caratteri della biografia non ci starebbero.
+MAX_POST_CAPTIONS = 6
+
+
 def _instagram_input(url: str) -> dict:
     # L'Actor apify~instagram-profile-scraper richiede la lista di "usernames",
     # NON gli URL diretti (con directUrls dava 400 "Field input.usernames is
@@ -78,17 +87,25 @@ def _instagram_extract(items: list) -> str:
             texts.append(f"@{item['username']}")
         if item.get("externalUrl"):
             texts.append(item["externalUrl"])
-        if item.get("businessEmail"):
-            texts.append(item["businessEmail"])
-        if item.get("businessPhoneNumber"):
-            texts.append(item["businessPhoneNumber"])
+        # Telefono di contatto (account business/creator): l'actor Apify lo espone
+        # sotto nomi diversi a seconda della versione.
+        for k in ("businessPhoneNumber", "public_phone_number", "contactPhoneNumber"):
+            if item.get(k):
+                texts.append(str(item[k]))
         if item.get("businessCategoryName"):
             texts.append(f"Categoria: {item['businessCategoryName']}")
+        # Email di contatto: è il dato di contatto più pesante e non deve sfuggire per
+        # un nome di campo diverso dal previsto (businessEmail / public_email / ...).
+        # Invece di indovinare il nome, si raccoglie ogni email che compaia in un
+        # qualunque campo testuale del profilo. La deduplicazione avviene a valle.
+        for v in item.values():
+            if isinstance(v, str):
+                texts.extend(_EMAIL_RE.findall(v))
         # Post recenti (caption)
         if item.get("caption"):
             texts.append(item["caption"])
         if item.get("latestPosts"):
-            for post in item["latestPosts"][:5]:
+            for post in item["latestPosts"][:MAX_POST_CAPTIONS]:
                 if post.get("caption"):
                     texts.append(post["caption"])
     return " | ".join(texts)
