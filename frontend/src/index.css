@@ -52,8 +52,11 @@
   --c-surface2: #f4f4f5;
   --c-line: #e8e8ea;
   --c-ink: #18181b;
-  --c-muted: #71717a;
-  --c-faint: #a1a1aa;
+  --c-muted: #71717a;   /* 4.83:1 su bianco */
+  /* faint: usato per il testo PIÙ PICCOLO (10-11px), quindi deve rispettare 4.5:1
+     come tutto il resto — il testo piccolo non gode dell'eccezione dei 3:1, che vale
+     solo dai 18px (o 14px bold). Era #a1a1aa = 2.56:1, illeggibile su proiettore. */
+  --c-faint: #74747e;   /* 4.62:1 su bianco */
   /* Accento FREDDO (blu): fuori dalla scala calda del rischio (rosso/ambra/verde),
      quindi non vi compete mai. Blu = affidabilità/sicurezza, adatto a un tool privacy. */
   --c-accent: #2563eb;
@@ -74,8 +77,8 @@
   --c-surface2: #1c1c1f;
   --c-line: #2a2a2e;
   --c-ink: #f4f4f5;
-  --c-muted: #a1a1aa;
-  --c-faint: #6b6b73;
+  --c-muted: #a1a1aa;   /* 8.60:1 sul fondo scuro */
+  --c-faint: #7d7d86;   /* era #6b6b73 = 3.75:1, sotto la soglia. Ora 4.85:1 */
   /* Accento blu anche sullo scuro (un filo più chiaro per staccare dal nero). */
   --c-accent: #3b82f6;
   --c-accentink: #ffffff;
@@ -96,6 +99,15 @@
     font-family: var(--font-sans);
     transition: background-color 0.35s ease, color 0.35s ease;
     -webkit-font-smoothing: antialiased;
+  }
+  /* Durante lo switch di tema tutte le transizioni sono disattivate (la classe è messa
+     sul root da App per un frame): così il tema cambia di colpo e ovunque, senza box che
+     "restano indietro" animando sfondo/bordo. */
+  .no-theme-anim,
+  .no-theme-anim *,
+  .no-theme-anim *::before,
+  .no-theme-anim *::after {
+    transition: none !important;
   }
   ::selection {
     background: var(--c-accent);
