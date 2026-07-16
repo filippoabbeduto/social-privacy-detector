@@ -52,3 +52,9 @@ coverage/
 
 # AWS
 .aws/
+
+# Artefatti di build LaTeX (rigenerabili da relazione.tex)
+relazione/*.aux
+relazione/*.log
+relazione/*.out
+relazione/*.toc
