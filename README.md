@@ -107,9 +107,17 @@ social-privacy-detector/
 │   │   ├── pipeline.py         # Pipeline di analisi condivisa (thread in-process / Lambda)
 │   │   ├── scraper.py          # Scraping social (Apify)
 │   │   └── storage.py          # Persistenza (DynamoDB+S3 / in-memory mock)
-│   └── tests/                  # Suite pytest (161 test)
-├── docs/
-│   └── REGISTRO_SVILUPPO_AI.md # Registro dello sviluppo assistito da IA
+│   └── tests/                  # Suite pytest (174 test)
+├── infra/
+│   ├── cloud.yaml              # IaC CloudFormation (SQS+DLQ+Lambda+CloudWatch)
+│   ├── oidc-trust.json         # Trust OIDC per il ruolo di deploy (no chiavi statiche)
+│   ├── gha-deploy-policy.json  # Permessi IAM della pipeline CI
+│   └── cleanup.sh              # Smontaggio risorse AWS
+├── relazione/
+│   ├── relazione.pdf           # Relazione (deliverable)
+│   ├── relazione.tex           # Sorgente LaTeX
+│   └── img/                    # Figure (grafici CloudWatch, loghi)
+├── report-esempio/             # Tre report d'esempio (rischio alto/medio/basso)
 ├── docker-compose.yml          # Orchestrazione 3 container (sviluppo)
 ├── docker-compose.prod.yml     # Orchestrazione produzione (immagini ECR)
 ├── nginx.conf                  # Reverse proxy principale
