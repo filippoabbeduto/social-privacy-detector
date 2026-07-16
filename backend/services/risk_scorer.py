@@ -3,8 +3,15 @@
 # Percorso: backend/services/risk_scorer.py
 # ==============================================================================
 
+import math
+import os
 from typing import List, Tuple
 from models.schemas import PIIEntity
+
+# Modello di rischio selezionabile via env:
+#   "empirical" (default): Rischio = Σ Pₐ·Iₐ con impatti/probabilità da studi (risk_empirical.py).
+#   "heuristic": modello storico (pesi base + combo + compressione), disponibile come alternativa.
+RISK_MODEL = os.getenv("RISK_MODEL", "empirical").lower()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -58,6 +65,70 @@ RISK_THRESHOLDS = {
     "MEDIUM": 35,
 }
 
+# Gerarchia di pericolosità dei tipi PII (dal più al meno pericoloso): guida la
+# sanitizzazione mirata, che rimuove prima i dati ad alto impatto identitario/finanziario.
+_DANGER_ORDER = [
+    "FISCAL_CODE", "IBAN", "CREDIT_DEBIT_NUMBER", "PHONE_NUMBER", "DATE_OF_BIRTH",
+    "AGE", "ADDRESS", "EMAIL", "USERNAME", "URL", "LOCATION", "ORGANIZATION", "NAME",
+]
+
+
+def plan_sanitization(detected_piis, target=None):
+    """Pianifica la rimozione MINIMA per portare il rischio sotto la soglia BASSO.
+    Rimuove i dati per pericolosità decrescente finché score < target (default MEDIUM=35).
+    Deterministico: riusa build_risk_assessment. Ritorna {to_remove, to_keep, final_score, final_level}."""
+    if target is None:
+        target = RISK_THRESHOLDS["MEDIUM"]
+    if not detected_piis:
+        return {"to_remove": [], "to_keep": [], "final_score": 0, "final_level": "LOW"}
+
+    def danger(p):
+        # tipi non elencati → meno pericolosi (in coda)
+        return _DANGER_ORDER.index(p.type) if p.type in _DANGER_ORDER else len(_DANGER_ORDER)
+
+    _, _, base, _ = build_risk_assessment(detected_piis, apply_floor=False)
+    if base < target:
+        lvl, _, sc, _ = build_risk_assessment(detected_piis, apply_floor=False)
+        return {"to_remove": [], "to_keep": list(detected_piis), "final_score": sc, "final_level": lvl}
+
+    # Ordina i CANDIDATI alla rimozione dal più al meno pericoloso.
+    ordered = sorted(detected_piis, key=danger)
+    to_remove = []
+    remaining = list(detected_piis)
+    for p in ordered:
+        _, _, score, _ = build_risk_assessment(remaining, apply_floor=False)
+        if score < target:
+            break
+        to_remove.append(p)
+        remaining = [q for q in remaining if q is not p]
+
+    keep_ids = {id(q) for q in remaining}
+    to_keep = [q for q in detected_piis if id(q) in keep_ids]
+    lvl, _, sc, _ = build_risk_assessment(to_keep, apply_floor=False)
+    return {"to_remove": to_remove, "to_keep": to_keep, "final_score": sc, "final_level": lvl}
+
+# Compressione della scala oltre la soglia HIGH. La somma pesata (base + combo +
+# diversità) è illimitata e, per profili molto esposti, sfonda facilmente il 100:
+# la fascia alta satura e perde risoluzione (un profilo "grave" e uno "gravissimo"
+# leggono entrambi 100). Sotto 70 la scala è ben tarata e resta INVARIATA; sopra 70
+# si applica una curva concava che spalma [70, ∞) su [70, 100), avvicinandosi a 100
+# senza raggiungerlo quasi mai. COMPRESSION_K governa la ripidità (più alto = più
+# lenta la saturazione). Le soglie 35/70 restano valide: la trasformazione è
+# monotòna e lascia fisso il punto 70.
+# K=100: ritarato dopo il passaggio a "tutte le combo" (raw più grandi). Con questo
+# valore solo la configurazione quasi-massima tocca 100; i profili realistici (fino a
+# ~6 tipi distinti) restano sotto, ordinati per gravità.
+COMPRESSION_START = 70
+COMPRESSION_K = 100.0
+
+
+def _compress(raw: float) -> float:
+    """Compressione concava sopra COMPRESSION_START (identità sotto). Monotòna."""
+    if raw <= COMPRESSION_START:
+        return raw
+    span = 100 - COMPRESSION_START
+    return COMPRESSION_START + span * (1 - math.exp(-(raw - COMPRESSION_START) / COMPRESSION_K))
+
 # Soglia minima di confidence per far contribuire una PII al PUNTEGGIO.
 # I rilevamenti troppo incerti (es. Comprehend che tagga spazzatura OCR a 0.49)
 # non devono pesare né innescare combo. NB: filtra solo il calcolo dello score,
@@ -87,6 +158,23 @@ COMBO_BONUSES = [
     ({"NAME", "ADDRESS", "PHONE"},                             40, "doxing_contattabile"),
     ({"ADDRESS", "PHONE"},                                     22, "localizzazione_contattabile"),
     ({"NAME", "PHONE"},                                        18, "identita_contattabile"),
+    # ── Codici identificativi e finanziari ───────────────────────────────────
+    # Il CODICE FISCALE non è un dato "isolato": codifica al suo interno data di
+    # nascita, sesso e comune di nascita. Combinato con nome/contatti diventa una
+    # chiave d'identità civile (INPS, Agenzia delle Entrate, SPID, recupero account).
+    # L'IBAN e i dati di conto/carta aprono invece la frode finanziaria diretta
+    # (BEC, false richieste di pagamento/rimborso, addebiti SEPA).
+    ({"FISCAL_CODE", "NAME"},                                  25, "identita_anagrafica_cf"),
+    ({"FISCAL_CODE", "EMAIL"},                                 20, "recupero_account_cf"),
+    ({"FISCAL_CODE", "PHONE_NUMBER"},                          22, "identita_sim_cf"),
+    ({"FISCAL_CODE", "PHONE"},                                 22, "identita_sim_cf"),
+    ({"IBAN", "NAME"},                                         25, "frode_finanziaria"),
+    ({"IBAN", "EMAIL"},                                        22, "frode_pagamento_bec"),
+    ({"BANK_ACCOUNT_NUMBER", "NAME"},                          25, "frode_finanziaria"),
+    ({"CREDIT_DEBIT_NUMBER", "NAME"},                          28, "frode_carta"),
+    # Codice fiscale + coordinate bancarie = identità civile e finanziaria insieme.
+    ({"FISCAL_CODE", "IBAN"},                                  30, "identita_finanziaria"),
+    ({"FISCAL_CODE", "IBAN", "NAME"},                          40, "identita_finanziaria_totale"),
 ]
 
 
@@ -99,6 +187,29 @@ def _confidence_multiplier(score: float) -> float:
     if score >= 0.85: return 0.85
     if score >= 0.70: return 0.65
     return 0.40
+
+
+def _select_combos(present_types: set):
+    """
+    Restituisce TUTTE le combinazioni pericolose applicabili (i cui tipi sono un
+    sottoinsieme di quelli presenti), ordinate per (num_tipi, bonus) decrescente.
+
+    Razionale (ogni combo = un vettore d'attacco distinto):
+      Una PII può abilitare più attacchi diversi. Es. con EMAIL+PHONE+DOB un attaccante
+      può tentare sia il contatto multiplo (EMAIL+PHONE) sia il furto d'identità completo
+      (EMAIL+PHONE+DOB): sono minacce DISTINTE e realizzabili, quindi entrambe pesano
+      sull'esposizione al social engineering. Si contano perciò tutte le combo presenti,
+      non solo una. La crescita dello score è tenuta a bada dalla compressione concava
+      finale (_compress), non escludendo combo.
+    Monotòna: aggiungere un dato può solo rendere applicabili PIÙ combo, mai meno.
+    """
+    return [
+        (required_types, bonus, label)
+        for required_types, bonus, label in sorted(
+            COMBO_BONUSES, key=lambda x: (len(x[0]), x[1]), reverse=True
+        )
+        if required_types.issubset(present_types)
+    ]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -153,6 +264,15 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
     has_home_address    = "ADDRESS" in present_types
     # Doxing: nome completo + indirizzo fisico = identificazione + localizzazione.
     doxing_ready        = has_full_name and has_home_address
+    # Codici identificativi/finanziari. Il CF codifica data di nascita, sesso e
+    # comune di nascita: è aggregazione compressa in un solo codice.
+    has_fiscal_code     = "FISCAL_CODE" in present_types
+    has_financial       = bool(
+        {"IBAN", "BANK_ACCOUNT_NUMBER", "INTERNATIONAL_BANK_ACCOUNT_NUMBER", "CREDIT_DEBIT_NUMBER"}
+        & present_types
+    )
+    # CF + coordinate bancarie = identità civile e finanziaria insieme.
+    financial_identity  = has_fiscal_code and has_financial
 
     # --- Combinazioni critiche ---
     full_identity_combo   = {"EMAIL", "PHONE_NUMBER", "DATE_OF_BIRTH"}.issubset(present_types)
@@ -174,6 +294,9 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
         "has_identity_anchor":  has_identity_anchor,
         "doxing_ready":         doxing_ready,
         "has_home_address":     has_home_address,
+        "has_fiscal_code":      has_fiscal_code,
+        "has_financial":        has_financial,
+        "financial_identity":   financial_identity,
         "full_identity_combo":  full_identity_combo,
         "spear_phishing_ready": spear_phishing_ready,
         "social_graph_exposed": social_graph_exposed,
@@ -191,12 +314,13 @@ def extract_features(detected_piis: List[PIIEntity]) -> dict:
 def calculate_risk_score(features: dict) -> Tuple[int, List[str]]:
     """
     Calcola uno score numerico (0-100) a partire dalle feature estratte.
-    La logica è a cinque livelli:
+    La logica è a sei livelli:
       1. Peso base per ogni tipo di PII, modulato dalla confidence
       2. Bonus diversità: testi distinti dello stesso tipo (es. 3 città diverse)
       3. Bonus abitudine: stesso testo ripetuto per LOCATION/ORGANIZATION
-      4. Bonus della combo più specifica (mutuamente esclusivi)
+      4. Bonus delle combo disgiunte selezionate (set-packing, vedi _select_combos)
       5. Bonus diversità dell'esposizione (tipi distinti)
+      6. Compressione concava della fascia alta (vedi _compress) + clamp a 100
     Restituisce (score, motivations) per trasparenza nel report.
     """
     score = 0.0
@@ -237,20 +361,10 @@ def calculate_risk_score(features: dict) -> Tuple[int, List[str]]:
                     f"{pii_type} '{text}' menzionato {reps} volte: {label} rilevata (+{habit_bonus}pt)"
                 )
 
-    # 4. Bonus combo: si applica SOLO la combo più specifica (più tipi matchanti)
-    #    per evitare accumulo artificiale dello score.
-    #    Ordiniamo per numero di tipi richiesti (decrescente): la prima che
-    #    matcha è quella più specifica.
-    best_combo = None
-    for required_types, bonus, label in sorted(
-        COMBO_BONUSES, key=lambda x: len(x[0]), reverse=True
-    ):
-        if required_types.issubset(features["present_types"]):
-            best_combo = (required_types, bonus, label)
-            break
-
-    if best_combo:
-        required_types, bonus, label = best_combo
+    # 4. Bonus combo: si sommano TUTTE le combo applicabili (ogni combo = un vettore
+    #    d'attacco distinto realizzabile). L'accumulo è controllato a valle dalla
+    #    compressione concava, non escludendo combo. Vedi _select_combos.
+    for required_types, bonus, label in _select_combos(features["present_types"]):
         # #1: una combo vale quanto il suo anello più debole. Si scala il bonus per
         # il moltiplicatore di confidence MINIMO tra i tipi che la compongono, così
         # una combinazione basata su un rilevamento incerto non pesa a forza piena.
@@ -269,14 +383,48 @@ def calculate_risk_score(features: dict) -> Tuple[int, List[str]]:
         score += 7
         motivations.append("Esposizione diversificata (3+ tipi PII distinti): +7pt")
 
-    return min(round(score), 100), motivations
+    # 6. Compressione concava della fascia alta (vedi _compress): la somma grezza,
+    #    illimitata, viene mappata su [0,100] evitando la saturazione a 100. Quando la
+    #    compressione cambia il valore, lo si dichiara (la somma dei contributi sopra
+    #    NON coincide più col totale: onestà espositiva).
+    raw = round(score)
+    final = min(round(_compress(score)), 100)
+    if raw != final:
+        motivations.append(
+            f"Scala compressa: contributi grezzi {raw}pt → {final}/100 "
+            f"(curva concava anti-saturazione oltre {COMPRESSION_START})"
+        )
+
+    return final, motivations
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # RISK LEVEL + SPIEGAZIONE CONTESTUALE
 # ──────────────────────────────────────────────────────────────────────────────
 
-def build_risk_assessment(detected_piis: List[PIIEntity]) -> Tuple[str, str, int, List[str]]:
+def _reliable(detected_piis: List[PIIEntity], apply_floor: bool) -> List[PIIEntity]:
+    """
+    Filtra i rilevamenti sotto la soglia di confidence, se richiesto.
+    apply_floor=False è usato dall'endpoint /rescore: lì l'utente ha già scelto
+    manualmente QUALI dati conteggiare (funzione "e se non l'avessi pubblicato?" e
+    conferma di un rilevamento incerto), quindi la selezione del client è definitiva
+    e non va rifiltrata dalla soglia automatica.
+    """
+    if not apply_floor:
+        return list(detected_piis)
+    return [p for p in detected_piis if p.score >= CONFIDENCE_FLOOR]
+
+
+def build_risk_assessment(detected_piis: List[PIIEntity], apply_floor: bool = True) -> Tuple[str, str, int, List[str]]:
+    """Dispatcher: instrada al modello selezionato da RISK_MODEL. Il modello empirico è
+    importato lazy per evitare l'import circolare (risk_empirical importa da qui)."""
+    if RISK_MODEL == "empirical":
+        from services.risk_empirical import build_empirical_assessment
+        return build_empirical_assessment(detected_piis, apply_floor)
+    return _build_heuristic_assessment(detected_piis, apply_floor)
+
+
+def _build_heuristic_assessment(detected_piis: List[PIIEntity], apply_floor: bool = True) -> Tuple[str, str, int, List[str]]:
     """
     Entry point principale del modulo.
     Restituisce: (risk_level, explanation, numeric_score, motivations)
@@ -284,7 +432,7 @@ def build_risk_assessment(detected_piis: List[PIIEntity]) -> Tuple[str, str, int
     # #2: si calcola il punteggio SOLO sui rilevamenti abbastanza affidabili.
     # Sotto la soglia il dato è troppo incerto per pesare (né base, né combo, né
     # diversità). La lista PII mostrata all'utente resta invariata a monte.
-    reliable_piis = [p for p in detected_piis if p.score >= CONFIDENCE_FLOOR]
+    reliable_piis = _reliable(detected_piis, apply_floor)
     features = extract_features(reliable_piis)
     score, motivations = calculate_risk_score(features)
 
@@ -306,7 +454,15 @@ def _build_explanation(risk_level: str, features: dict, score: int) -> str:
     """
     parts = []
 
-    if features["doxing_ready"]:
+    if features["financial_identity"]:
+        parts.append(
+            "Il profilo espone il codice fiscale insieme a coordinate bancarie/di conto: "
+            "identità civile e finanziaria sono compromesse insieme. Il codice fiscale "
+            "consente impersonificazione presso servizi pubblici (SPID, INPS, Agenzia delle "
+            "Entrate) e recupero di account; l'IBAN/conto abilita frodi di pagamento dirette "
+            "(false richieste di rimborso, addebiti SEPA, business email compromise)."
+        )
+    elif features["doxing_ready"]:
         parts.append(
             "Il profilo espone il nome completo insieme a un indirizzo fisico preciso: "
             "questa combinazione permette l'identificazione diretta della persona e la sua "
@@ -358,6 +514,12 @@ def _build_explanation(risk_level: str, features: dict, score: int) -> str:
             "localizzabile la persona e utilizzabile per attacchi mirati o consegne/"
             "comunicazioni fraudolente che sfruttano la conoscenza del luogo."
         )
+    elif features["has_financial"]:
+        parts.append(
+            "Sono esposte coordinate bancarie o dati di conto/carta: anche senza altri dati, "
+            "abilitano frodi di pagamento (false richieste di rimborso, addebiti SEPA) e "
+            "messaggi che imitano la banca facendo leva sui riferimenti reali del conto."
+        )
     elif features["contextual_count"] > 0:
         parts.append(
             "I dati contestuali rilevati (location, organizzazioni) non consentono un "
@@ -377,5 +539,68 @@ def _build_explanation(risk_level: str, features: dict, score: int) -> str:
             "Il profilo mostra una buona igiene della privacy digitale."
         )
 
+    # Nota trasversale: se è presente il codice fiscale, evidenzia che NON è un dato
+    # isolato ma ne racchiude altri (data di nascita, sesso, comune di nascita),
+    # deducibili senza alcuna fonte esterna. Vale in qualunque scenario sopra.
+    if features["has_fiscal_code"]:
+        parts.append(
+            "Nota: il codice fiscale non è un dato isolato — da esso si ricavano "
+            "direttamente data di nascita, sesso e comune di nascita, ampliando l'esposizione "
+            "oltre ai soli dati mostrati."
+        )
+
     parts.append(f"Score di rischio calcolato: {score}/100.")
     return " ".join(parts)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATI STRUTTURATI PER LA UI (mappa dell'aggregazione + segnale di routine)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def build_risk_extras(detected_piis: List[PIIEntity], apply_floor: bool = True) -> dict:
+    """Dispatcher: instrada al modello selezionato da RISK_MODEL (import lazy come sopra)."""
+    if RISK_MODEL == "empirical":
+        from services.risk_empirical import build_empirical_extras
+        return build_empirical_extras(detected_piis, apply_floor)
+    return _build_heuristic_extras(detected_piis, apply_floor)
+
+
+def _build_heuristic_extras(detected_piis: List[PIIEntity], apply_floor: bool = True) -> dict:
+    """
+    Estrae, dagli stessi dati usati per il punteggio, due strutture che la UI
+    disegna invece di descrivere a parole:
+      - combos: le combinazioni pericolose disgiunte effettivamente scattate, ognuna
+        {label, types, points} → "mappa dell'aggregazione": mostra QUALI dati,
+        combinati, abilitano quale attacco (la tesi del prodotto resa visibile).
+      - repetitions: i testi (LOCATION/ORGANIZATION) ripetuti ≥3 volte
+        ({type, text, count, label}) → "segnale di routine": la frequenza è
+        essa stessa un dato (un luogo citato più volte = abitudine sfruttabile).
+    Le due informazioni sono GIÀ calcolate dallo scorer ma finivano appiattite in
+    stringhe dentro `motivations`; qui vengono esposte in forma strutturata.
+    """
+    reliable_piis = _reliable(detected_piis, apply_floor)
+    features = extract_features(reliable_piis)
+    pii_by_type = features["pii_by_type"]
+
+    # Tutte le combo applicabili (ogni combo = un vettore d'attacco): la mappa
+    # dell'aggregazione le mostra come attacchi distinti.
+    combos = []
+    for required_types, bonus, label in _select_combos(features["present_types"]):
+        # Stesso scaling per confidence usato nel punteggio (anello più debole),
+        # così i punti mostrati nella mappa coincidono con quelli sommati allo score.
+        conf_factor = min(_confidence_multiplier(pii_by_type[t]) for t in required_types)
+        combos.append({
+            "label": label,
+            "types": sorted(required_types),
+            "points": round(bonus * conf_factor),
+        })
+
+    repetitions = []
+    for pii_type, text_counts in features.get("raw_repetitions", {}).items():
+        for text, reps in text_counts.items():
+            if reps >= 3:
+                rep_label = "routine geografica" if pii_type == "LOCATION" else "affiliazione confermata"
+                repetitions.append({"type": pii_type, "text": text, "count": reps, "label": rep_label})
+    repetitions.sort(key=lambda r: r["count"], reverse=True)
+
+    return {"combos": combos, "repetitions": repetitions}

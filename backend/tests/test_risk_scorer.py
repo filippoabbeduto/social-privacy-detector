@@ -4,7 +4,10 @@
 # ==============================================================================
 
 from models.schemas import PIIEntity
-from services.risk_scorer import build_risk_assessment
+# Questi test verificano il MODELLO EURISTICO in modo specifico: puntano direttamente
+# alla sua implementazione (non al dispatcher build_risk_assessment, il cui default è
+# ora "empirical"), così restano validi a prescindere dal modello di default.
+from services.risk_scorer import _build_heuristic_assessment as build_risk_assessment
 
 
 def _pii(pii_type: str, text: str, score: float = 0.99) -> PIIEntity:
