@@ -67,6 +67,16 @@ app.include_router(analysis_router)
 # ------------------------------------------------------------------------------
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
 
+# Descrizione leggibile del motore PII effettivamente attivo. Va LETTA dall'ambiente:
+# prima era la stringa fissa "Amazon Comprehend", che è rimasta lì quando il default è
+# passato a Presidio — l'endpoint dichiarava quindi un motore che non veniva usato.
+_PII_ENGINE_LABEL = {
+    "presidio": "Microsoft Presidio + spaCy IT (locale)",
+    "ensemble": "Presidio + LLM esterno con verifica (ensemble)",
+    "comprehend": "Amazon Comprehend (Boto3)",
+    "regex": "Motore a espressioni regolari (offline)",
+}
+
 
 @app.get("/api/health", status_code=status.HTTP_200_OK)
 def health_check():
@@ -74,13 +84,14 @@ def health_check():
     Rileva lo stato di salute del microservizio FastAPI,
     segnalando la configurazione attiva (Local-First Mock o AWS reale).
     """
+    pii_provider = os.getenv("PII_PROVIDER", "presidio").lower()
     return {
         "status": "healthy",
         "mock_mode_active": AWS_MOCK,
-        "region_configured": os.getenv("AWS_DEFAULT_REGION", "eu-west-1"),
+        "region_configured": os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
         "environment_mode": os.getenv("ENV", "development"),
         "services": {
-            "pii_detection": "Amazon Comprehend (Mock)" if AWS_MOCK else "Amazon Comprehend (Boto3)",
+            "pii_detection": _PII_ENGINE_LABEL.get(pii_provider, pii_provider),
             "ocr": "Amazon Textract (Mock)" if AWS_MOCK else "Amazon Textract (Boto3)",
             "ai_report": "Report deterministico (Mock)" if AWS_MOCK else "Google Gemini (gemini-2.5-flash)",
             "database": "In-Memory (Mock)" if AWS_MOCK else "Amazon DynamoDB (Boto3)",
