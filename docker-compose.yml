@@ -45,6 +45,18 @@ services:
     environment:
       - ENV=${ENV:-development}
       - AWS_MOCK=${AWS_MOCK:-true}
+      # Estrazione PII: presidio (default, locale) | ensemble (Presidio + LLM) | comprehend | regex
+      - PII_PROVIDER=${PII_PROVIDER:-presidio}
+      # LLM esterno per PII_PROVIDER=ensemble (vuoto = disattivo -> Presidio-solo)
+      - PII_LLM_BASE_URL=${PII_LLM_BASE_URL:-}
+      - PII_LLM_MODEL=${PII_LLM_MODEL:-}
+      # Modello di GENERAZIONE (report + esempio d'attacco), separato da quello di
+      # estrazione: sono compiti diversi e vincono modelli diversi (misurato).
+      - GEN_LLM_MODEL=${GEN_LLM_MODEL:-}
+      - PII_LLM_API_KEY=${PII_LLM_API_KEY:-}
+      - PII_LLM_API_KEY_SSM=${PII_LLM_API_KEY_SSM:-}
+      # Modello di rischio: empirical (default, Σ Pₐ·Iₐ da studi) | heuristic
+      - RISK_MODEL=${RISK_MODEL:-empirical}
       # Modalità worker: inprocess (default, thread locale) | sqs (API->SQS->Lambda)
       - WORKER_MODE=${WORKER_MODE:-inprocess}
       - SQS_QUEUE_URL=${SQS_QUEUE_URL:-}

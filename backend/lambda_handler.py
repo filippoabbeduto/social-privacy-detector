@@ -28,6 +28,7 @@ def handler(event, context):
                 social_url=job["social_url"],
                 scraped_content=job.get("scraped_content"),
                 image_labels=job.get("image_labels"),
+                face_ages=job.get("face_ages"),
             )
         except Exception as e:
             # Errore infrastrutturale (parsing del messaggio o eccezione risollevata

@@ -23,7 +23,17 @@ from models.schemas import (
     ProfileAnalysisRequest,
     AnalysisJobResponse,
     AnalysisReportResponse,
+    RescoreRequest,
+    RiskAssessment,
+    SanitizeRequest,
+    SanitizeResponse,
+    LeverageResponse,
+    LeverageItem,
+    AttackExampleRequest,
+    AttackExampleResponse,
 )
+from services.risk_scorer import build_risk_assessment, build_risk_extras
+from services.pipeline import report_service
 # La pipeline e i singleton dei servizi vivono ora in services/pipeline.py, così
 # da essere riusati identici sia dal thread in-process sia dalla Lambda (SQS).
 # Qui importiamo solo ciò che serve al router: la funzione di analisi, i due
@@ -36,6 +46,11 @@ from services import queue
 logger = logging.getLogger("social-privacy-backend")
 
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
+
+# Tetti difensivi sull'input degli endpoint sincroni: evitano che un testo enorme (o
+# una lista PII enorme) faccia lavoro O(N^2) sul thread di richiesta (leverage, sanitize).
+MAX_BIO_CHARS = 20000
+MAX_PII_ITEMS = 300
 
 # Modalità del worker che esegue la pipeline:
 #   inprocess (default): thread daemon nello stesso processo FastAPI (locale/mock)
@@ -55,7 +70,8 @@ router = APIRouter(prefix="/api", tags=["Analysis"])
 
 
 def _enqueue_job(analysis_id: str, social_url: str, scraped_content: Optional[str],
-                 image_labels: Optional[List[dict]] = None):
+                 image_labels: Optional[List[dict]] = None,
+                 face_ages: Optional[List[dict]] = None):
     """
     Accoda il job per l'elaborazione asincrona (pattern produttore/consumatore).
 
@@ -77,6 +93,9 @@ def _enqueue_job(analysis_id: str, social_url: str, scraped_content: Optional[st
             "social_url": social_url,
             "scraped_content": scraped_content,
             "image_labels": image_labels,
+            # Solo intervalli d'età ({low, high}), MAI il volto né un suo descrittore:
+            # nella coda non transita alcun dato biometrico.
+            "face_ages": face_ages,
         })
         logger.info(f"[SQS] Job {analysis_id} delegato alla Lambda via coda")
         return
@@ -84,7 +103,7 @@ def _enqueue_job(analysis_id: str, social_url: str, scraped_content: Optional[st
     # Modalità in-process (default): esegue run_analysis in un thread daemon.
     worker_thread = threading.Thread(
         target=run_analysis,
-        args=(analysis_id, social_url, scraped_content, image_labels),
+        args=(analysis_id, social_url, scraped_content, image_labels, face_ages),
         daemon=True,
     )
     worker_thread.start()
@@ -112,15 +131,18 @@ def analyze_profile(payload: ProfileAnalysisRequest):
     # 1. Genera ID univoco per il job
     analysis_id = str(uuid.uuid4())
 
+    # Tetto difensivo sul testo fornito dal client (evita lavoro O(N^2) a valle).
+    scraped = (payload.scraped_content or "")[:MAX_BIO_CHARS] or None
+
     # 2. Crea il job con stato PENDING nel database
     storage_service.create_job(
         analysis_id=analysis_id,
         social_url=payload.social_url,
-        scraped_content=payload.scraped_content,
+        scraped_content=scraped,
     )
 
     # 3. Accoda il lavoro (thread in-process)
-    _enqueue_job(analysis_id, payload.social_url, payload.scraped_content)
+    _enqueue_job(analysis_id, payload.social_url, scraped)
 
     # 4. Risponde immediatamente con 202 Accepted
     logger.info(f"Job {analysis_id} accodato. Il client può fare polling su GET /api/analysis/{analysis_id}")
@@ -160,12 +182,15 @@ async def analyze_image(file: UploadFile = File(...)):
             detail="Immagine troppo grande (max 5 MB).",
         )
 
-    # Due segnali complementari sull'immagine: testo visibile (Textract/OCR) ed
-    # etichette visive (Rekognition/DetectLabels). La foto viene analizzata se
-    # espone ALMENO uno dei due: una foto senza testo ma con contesto visivo
-    # (spiaggia, monumento, veicolo) è comunque rilevante per la privacy.
+    # Tre segnali complementari sull'immagine: testo visibile (Textract/OCR),
+    # etichette visive (Rekognition/DetectLabels) e stima dell'età dei volti
+    # (DetectFaces, solo AGE_RANGE: serve a segnalare i minori, che le etichette non
+    # vedono). La foto viene analizzata se espone ALMENO uno dei primi due: una foto
+    # senza testo ma con contesto visivo (spiaggia, monumento, veicolo) è comunque
+    # rilevante per la privacy.
     extracted_text = pii_service.extract_text_from_image(image_bytes)
     image_labels = pii_service.detect_image_labels(image_bytes)
+    face_ages = pii_service.detect_face_age_ranges(image_bytes)
     if (not extracted_text or not extracted_text.strip()) and not image_labels:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -177,7 +202,8 @@ async def analyze_image(file: UploadFile = File(...)):
     analysis_id = str(uuid.uuid4())
     source = f"immagine: {file.filename}" if file.filename else "immagine caricata"
     storage_service.create_job(analysis_id=analysis_id, social_url=source, scraped_content=extracted_text)
-    _enqueue_job(analysis_id, source, extracted_text, image_labels=image_labels)
+    _enqueue_job(analysis_id, source, extracted_text, image_labels=image_labels,
+                 face_ages=face_ages)
 
     logger.info(f"[Analisi immagine] Job {analysis_id} da '{file.filename}' accodato "
                 f"({len(extracted_text)} char OCR, {len(image_labels)} etichette).")
@@ -185,6 +211,122 @@ async def analyze_image(file: UploadFile = File(...)):
         analysis_id=analysis_id,
         status="PENDING",
         message="Immagine in analisi. Usa GET /api/analysis/{analysis_id} per lo stato.",
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /api/rescore - Ricalcolo interattivo del rischio ("e se non l'avessi
+# pubblicato?" + conferma dei rilevamenti incerti)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/rescore", response_model=RiskAssessment, status_code=status.HTTP_200_OK)
+def rescore(payload: RescoreRequest):
+    """
+    Ricalcola il rischio su un sottoinsieme di PII scelto dall'utente. Riusa la
+    STESSA logica di scoring dell'analisi principale (build_risk_assessment +
+    build_risk_extras), così il contro-fattuale è esatto e non una stima.
+
+    apply_floor=False: qui l'utente ha già deciso a mano cosa conteggiare
+    (escludendo un dato per vedere il calo, o confermando un rilevamento incerto),
+    quindi la soglia automatica di confidenza NON si riapplica.
+
+    Sincrono: nessuna I/O esterna (niente scraping/LLM/DynamoDB), solo aritmetica
+    in memoria → risponde subito, adatto all'interazione a ogni click.
+    """
+    piis = payload.detected_pii[:MAX_PII_ITEMS]
+    risk_level, explanation, score, motivations = build_risk_assessment(piis, apply_floor=False)
+    extras = build_risk_extras(piis, apply_floor=False)
+    return RiskAssessment(
+        risk_level=risk_level,
+        explanation=explanation,
+        score=score,
+        motivations=motivations,
+        combos=extras["combos"],
+        repetitions=extras["repetitions"],
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /api/leverage - Priorità di bonifica: leva di ciascuna PII sullo score
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _compute_leverage(piis):
+    """Per ogni PII (deduplicata per type+text) calcola di quanto scenderebbe lo score
+    rimuovendola. Deterministico, nessuna I/O. Ritorna (base_score, items ordinati desc)."""
+    if not piis:
+        return 0, []
+    _, _, base, _ = build_risk_assessment(piis, apply_floor=False)
+    seen, items = set(), []
+    for p in piis:
+        k = (p.type, p.text)
+        if k in seen:
+            continue
+        seen.add(k)
+        subset = [q for q in piis if (q.type, q.text) != k]
+        _, _, s, _ = build_risk_assessment(subset, apply_floor=False)
+        items.append({"type": p.type, "text": p.text, "delta": max(0, base - s)})
+    items.sort(key=lambda it: it["delta"], reverse=True)
+    return base, items
+
+
+@router.post("/leverage", response_model=LeverageResponse, status_code=status.HTTP_200_OK)
+def leverage(payload: RescoreRequest):
+    """Classifica le PII per quanto ridurrebbero il rischio se rimosse (guida alla bonifica).
+    Riusa la stessa logica di scoring; sincrono, in memoria."""
+    base, items = _compute_leverage(payload.detected_pii[:MAX_PII_ITEMS])
+    return LeverageResponse(base_score=base, items=[LeverageItem(**it) for it in items])
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /api/attack-example - Esempio DIDATTICO di messaggio d'attacco (via Ollama)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/attack-example", response_model=AttackExampleResponse, status_code=status.HTTP_200_OK)
+def attack_example(payload: AttackExampleRequest):
+    """On-demand: genera un solo esempio didattico del messaggio che un attaccante
+    potrebbe inviare, per il vettore indicato. Usa Ollama (PII_LLM_*); se non
+    configurato → message vuoto (feature non disponibile)."""
+    from services.attack_example import generate_attack_example, is_configured
+    if not is_configured():
+        return AttackExampleResponse(message="", reason="not_configured")
+    pii = [{"type": p.type, "text": p.text} for p in payload.pii]
+    msg, err = generate_attack_example(pii, payload.vector_label)
+    return AttackExampleResponse(message=msg, reason="" if msg else (err or "no_response"))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /api/sanitize-bio - Riscrive la bio senza PII e ne ricalcola il rischio
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/sanitize-bio", response_model=SanitizeResponse, status_code=status.HTTP_200_OK)
+def sanitize_bio(payload: SanitizeRequest):
+    """
+    Genera una "versione sicura" della biografia: rileva le PII, le rimuove/generalizza
+    (LLM in produzione, masking deterministico in mock/fallback), poi ri-rileva sul testo
+    ripulito e ricalcola il rischio. Trasforma il referto in un rimedio concreto: l'utente
+    esce con un testo pubblicabile e vede di quanto scende lo score.
+
+    Sincrono: una chiamata LLM + regex, nessuno scraping/coda → adatto al click.
+    """
+    text = (payload.text or "").strip()[:MAX_BIO_CHARS]
+    if not text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Testo vuoto.")
+
+    original_piis = pii_service.detect_pii(text)
+    from services.risk_scorer import plan_sanitization
+    plan = plan_sanitization(original_piis)
+    cleaned = report_service.sanitize_bio(text, plan["to_remove"])
+    cleaned_piis = pii_service.detect_pii(cleaned)
+    risk_level, _, score, _ = build_risk_assessment(cleaned_piis)
+
+    logger.info(f"[Sanitize] mirata: rimossi {len(plan['to_remove'])}/{len(original_piis)} "
+                f"dati (target BASSO), score effettivo {score} ({risk_level})")
+    return SanitizeResponse(
+        cleaned_text=cleaned,
+        score=score,
+        risk_level=risk_level,
+        removed_types=sorted({p.type for p in plan["to_remove"]}),
+        kept_types=sorted({p.type for p in plan["to_keep"]}),
     )
 
 
@@ -220,6 +362,9 @@ def get_analysis(analysis_id: str):
         status=record["status"],
         detected_pii=record.get("detected_pii"),
         image_labels=record.get("image_labels"),
+        sensitive_visual=record.get("sensitive_visual"),
+        attacker_dossier=record.get("attacker_dossier"),
+        fiscal_code_info=record.get("fiscal_code_info"),
         narrative_summary=record.get("narrative_summary"),
         social_engineering_report=record.get("social_engineering_report"),
         risk_assessment=record.get("risk_assessment"),

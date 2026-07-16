@@ -81,7 +81,7 @@ class StorageService:
         if not AWS_MOCK:
             try:
                 import boto3
-                region = os.getenv("AWS_DEFAULT_REGION", "eu-west-1")
+                region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
                 dynamodb = boto3.resource("dynamodb", region_name=region)
                 self.dynamodb_table = dynamodb.Table(self.table_name)
                 self.s3_client = boto3.client("s3", region_name=region)

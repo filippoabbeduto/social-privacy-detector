@@ -17,3 +17,8 @@ pydantic==2.13.4          # validazione modelli I/O (Pydantic v2)
 boto3==1.43.40            # AWS SDK per Python (Comprehend, Textract, DynamoDB, S3)
 openai==2.44.0            # SDK OpenAI usato contro endpoint OpenAI-compatible (Gemini/DeepSeek/OpenAI) per il report generativo
 requests==2.34.2          # client HTTP usato per l'API REST di Apify
+presidio-analyzer==2.2.363 # estrazione PII locale/deterministica (NER + recognizer custom)
+spacy==3.8.13             # motore NLP per Presidio (modello NER italiano)
+# Modello NER italiano di spaCy (necessario a Presidio). Installabile anche con:
+#   python -m spacy download it_core_news_lg
+it-core-news-lg @ https://github.com/explosion/spacy-models/releases/download/it_core_news_lg-3.8.0/it_core_news_lg-3.8.0-py3-none-any.whl

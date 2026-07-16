@@ -43,6 +43,18 @@ services:
     environment:
       - ENV=${ENV:-production}
       - AWS_MOCK=${AWS_MOCK:-false}
+      - PII_PROVIDER=${PII_PROVIDER:-presidio}
+      # LLM esterno per PII_PROVIDER=ensemble (vuoto = disattivo -> Presidio-solo)
+      - PII_LLM_BASE_URL=${PII_LLM_BASE_URL:-}
+      - PII_LLM_MODEL=${PII_LLM_MODEL:-}
+      # Modello di GENERAZIONE (report + esempio d'attacco), separato da quello di
+      # estrazione: vuoto = usa PII_LLM_MODEL. Mancava qui pur essendo in
+      # docker-compose.yml, quindi in produzione la generazione ricadeva sul modello
+      # di estrazione, che scrive un italiano peggiore.
+      - GEN_LLM_MODEL=${GEN_LLM_MODEL:-}
+      - PII_LLM_API_KEY=${PII_LLM_API_KEY:-}
+      - PII_LLM_API_KEY_SSM=${PII_LLM_API_KEY_SSM:-}
+      - RISK_MODEL=${RISK_MODEL:-empirical}
       # Modalità worker: inprocess (default) | sqs (produttore: invia i job a SQS,
       # la Lambda li consuma). Attivare mettendo WORKER_MODE=sqs + SQS_QUEUE_URL
       # (output QueueUrl dello stack CloudFormation) in .env.production.

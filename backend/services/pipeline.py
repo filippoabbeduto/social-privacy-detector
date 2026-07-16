@@ -30,7 +30,7 @@ from services.pii_detector import PIIDetectorService
 from services.report_generator import ReportGeneratorService
 from services.scraper import ScraperService
 from services.storage import StorageService
-from services.risk_scorer import build_risk_assessment
+from services.risk_scorer import build_risk_assessment, build_risk_extras
 
 logger = logging.getLogger("social-privacy-backend")
 
@@ -47,7 +47,7 @@ storage_service = StorageService()
 # di un profilo. LIMITE ESSENZIALE PER I COSTI: senza, un profilo con migliaia di
 # post scaricherebbe e analizzerebbe ogni foto, esaurendo credito Apify/Textract.
 # Configurabile via env; default prudente.
-MAX_POST_IMAGES_OCR = int(os.getenv("MAX_POST_IMAGES_OCR", "5"))
+MAX_POST_IMAGES_OCR = int(os.getenv("MAX_POST_IMAGES_OCR", "6"))
 
 # Tetto di dimensione per le immagini analizzate (upload utente e download dai post).
 # Sia Textract (DetectDocumentText) sia Rekognition (DetectLabels), quando l'immagine
@@ -111,17 +111,20 @@ def _fetch_image_safely(url: str) -> Optional[bytes]:
         return None
 
 
-def _process_post_images(image_urls: List[str]) -> Tuple[List[str], List[dict]]:
+def _process_post_images(image_urls: List[str]) -> Tuple[List[str], List[dict], List[dict]]:
     """
     Scarica le prime MAX_POST_IMAGES_OCR immagini dei post (in modo sicuro, vedi
-    _fetch_image_safely) e ne ricava due segnali: il testo visibile via Amazon
-    Textract (OCR retrospettivo) e le etichette visive via Amazon Rekognition
-    (oggetti/scene/luoghi). Cattura sia le PII testuali dentro le foto sia
-    l'esposizione visiva (dove/cosa mostra la foto). Ogni immagine è indipendente:
-    un errore o uno scarto su una non blocca le altre.
+    _fetch_image_safely) e ne ricava TRE segnali: il testo visibile via Amazon
+    Textract (OCR retrospettivo), le etichette visive via Amazon Rekognition
+    (oggetti/scene/luoghi) e la stima dell'età dei volti (solo AGE_RANGE, per
+    segnalare i minori: le etichette da sole non li vedono — vedi visual_exposure).
+    Cattura così le PII testuali dentro le foto, l'esposizione visiva (dove/cosa
+    mostra la foto) e la presenza di minori. Ogni immagine è indipendente: un errore
+    o uno scarto su una non blocca le altre.
     """
     texts: List[str] = []
     labels: List[dict] = []
+    faces: List[dict] = []
     for url in image_urls[:MAX_POST_IMAGES_OCR]:
         content = _fetch_image_safely(url)
         if not content:
@@ -130,11 +133,14 @@ def _process_post_images(image_urls: List[str]) -> Tuple[List[str], List[dict]]:
         if extracted and extracted.strip():
             texts.append(extracted.strip())
         labels.extend(pii_service.detect_image_labels(content))
+        faces.extend(pii_service.detect_face_age_ranges(content))
     if texts:
         logger.info(f"[Textract] OCR post: testo estratto da {len(texts)} immagini.")
     if labels:
         logger.info(f"[Rekognition] Etichette visive dai post: {len(labels)} totali.")
-    return texts, _dedupe_labels(labels)
+    if faces:
+        logger.info(f"[Rekognition] Volti con età stimata: {len(faces)}.")
+    return texts, _dedupe_labels(labels), faces
 
 
 def _dedupe_labels(labels: List[dict]) -> List[dict]:
@@ -152,7 +158,8 @@ def _dedupe_labels(labels: List[dict]) -> List[dict]:
 
 
 def run_analysis(analysis_id: str, social_url: str, scraped_content: Optional[str],
-                 image_labels: Optional[List[dict]] = None):
+                 image_labels: Optional[List[dict]] = None,
+                 face_ages: Optional[List[dict]] = None):
     """
     Esegue l'intera pipeline di analisi. Invocata sia dal thread in-process sia
     dalla Lambda (consumatore SQS). Stesso codice in mock e in produzione: cambia
@@ -211,9 +218,10 @@ def run_analysis(analysis_id: str, social_url: str, scraped_content: Optional[st
                 return
 
             # Analisi delle immagini dei post (fino al limite configurato): il testo
-            # OCR viene aggiunto a quello analizzato (PII dentro le foto) e le
-            # etichette visive Rekognition alimentano l'esposizione visiva.
-            ocr_texts, image_labels = _process_post_images(image_urls)
+            # OCR viene aggiunto a quello analizzato (PII dentro le foto), le
+            # etichette visive Rekognition alimentano l'esposizione visiva e la stima
+            # d'età dei volti serve a segnalare i minori.
+            ocr_texts, image_labels, face_ages = _process_post_images(image_urls)
             if ocr_texts:
                 target_text += (
                     "\n\n[Testo rilevato nelle immagini dei post]\n" + "\n".join(ocr_texts)
@@ -231,18 +239,85 @@ def run_analysis(analysis_id: str, social_url: str, scraped_content: Optional[st
                 seen.add(key)
                 detected_piis.append(entity)
 
-        # Step 4: Generazione report (sintesi narrativa + vettori) su dati deduplicati.
-        # Le etichette visive (Rekognition) arricchiscono il prompt LLM: la sintesi e
-        # i vettori tengono conto anche dell'esposizione dedotta dalle immagini.
-        narrative_summary, social_threats = report_service.generate_report(detected_piis, image_labels)
+        # Cross-tipo: la stessa stringa non deve comparire sotto due tipi FUZZY. spaCy,
+        # su occorrenze diverse dello stesso testo, a volte lo tagga NOME in un punto e
+        # ORGANIZZAZIONE in un altro ("Cosenza" come LOCATION 0.95 E ORGANIZATION 0.85):
+        # nel report esce due volte con tipi in conflitto. Si tiene il tipo a confidenza
+        # più alta. Solo per il display: lo score usa raw_piis, e un'org senza email non
+        # abilita comunque nulla, quindi il punteggio non cambia.
+        _FUZZY = {"NAME", "LOCATION", "ORGANIZATION"}
+        best_type = {}  # testo → (score, tipo) del tipo fuzzy più confidente
+        for e in detected_piis:
+            if e.type in _FUZZY:
+                cur = best_type.get(e.text.lower())
+                if cur is None or e.score > cur[0]:
+                    best_type[e.text.lower()] = (e.score, e.type)
+        detected_piis = [e for e in detected_piis
+                         if e.type not in _FUZZY or best_type[e.text.lower()][1] == e.type]
 
-        # Step 5: Calcolo livello di rischio tramite feature engineering (su dati RAW)
+        # Step 4: Calcolo livello di rischio tramite feature engineering (su dati RAW).
+        # Fatto PRIMA del report così i vettori d'attacco che l'LLM spiega COINCIDONO con
+        # gli attacchi/combinazioni che lo score ha effettivamente calcolato (coerenza).
         risk_level, risk_explanation, risk_score, risk_motivations = build_risk_assessment(raw_piis)
+        # Dati strutturati per la UI: attacchi/combinazioni scattati (mappa dell'aggregazione)
+        # e testi ripetuti (segnale di routine).
+        risk_extras = build_risk_extras(raw_piis)
+
+        # Le etichette visive si usano con DUE soglie: Rekognition viene interrogato in
+        # modo largo (recall), ma report e UI vedono solo quelle affidabili, altrimenti
+        # l'elenco si riempie di rumore. La classificazione delle categorie sensibili
+        # (Step 5c) usa invece la lista COMPLETA.
+        from services.pii_detector import VISUAL_DISPLAY_MIN_CONFIDENCE
+        display_labels = [l for l in (image_labels or [])
+                          if l.get("confidence", 0) >= VISUAL_DISPLAY_MIN_CONFIDENCE]
+
+        # Step 5: Generazione report — l'LLM SPIEGA gli attacchi calcolati dallo score
+        # (non ne inventa altri). Le etichette visive (Rekognition) restano contesto.
+        narrative_summary, social_threats = report_service.generate_report(
+            detected_piis, display_labels, attacks=risk_extras["combos"]
+        )
+
+        # Step 5b: se ci sono codici fiscali, decodifica il comune di nascita in modo
+        # DETERMINISTICO (tabella dei codici catastali dei comuni, non LLM: quest'ultimo
+        # allucinava i comuni). Data e sesso restano deterministici lato UI.
+        from services.comuni import decode_fiscal_codes as decode_cf_comune
+        fiscal_codes = [p.text for p in detected_piis if p.type == "FISCAL_CODE"]
+        fiscal_code_info = decode_cf_comune(fiscal_codes) if fiscal_codes else []
+
+        # Step 5d: dossier dell'attaccante — ricompone i frammenti PII in un'identità
+        # (deterministico, nessun LLM), con le lacune ancora da colmare.
+        from services.dossier import build_dossier
+        attacker_dossier = build_dossier(detected_piis, fiscal_code_info)
+
+        # Step 5c: esposizione visiva SENSIBILE — classifica le etichette Rekognition
+        # (minori, documenti, geolocalizzazione) e, se presenti, aggiunge una nota alla
+        # sintesi (così finisce anche nel report/PDF). Nessun impatto sullo score.
+        # Due sorgenti per le categorie sensibili: le ETICHETTE (oggetti/scene) e la
+        # stima dell'ETÀ dei volti. Serve la seconda perché DetectLabels non vede i
+        # minori: su una foto reale con un minore di 9-15 anni restituisce "Adult" al
+        # 98.9% e mai "Child" (verificato interrogandolo senza filtri).
+        # La classificazione per etichette vede TUTTE le etichette, comprese quelle poco
+        # confidenti: per un minore un falso allarme è un fastidio, un mancato
+        # rilevamento è il fallimento della funzione. L'elenco mostrato all'utente resta
+        # invece filtrato (display_labels): recall qui, precisione lì.
+        # collapse_sensitive tiene UNA voce per categoria: le due sorgenti insieme
+        # producevano fino a sei avvisi per tre categorie, ripetendo lo stesso messaggio.
+        from services.visual_exposure import (classify_sensitive_labels, sensitive_note,
+                                              minors_from_faces, collapse_sensitive)
+        sensitive_visual = collapse_sensitive(classify_sensitive_labels(image_labels or []),
+                                              minors_from_faces(face_ages or []))
+        if sensitive_visual:
+            note = sensitive_note(sensitive_visual)
+            narrative_summary = (f"{narrative_summary} {note}".strip()
+                                 if narrative_summary else note)
 
         # Step 6: Salvataggio risultati → COMPLETED
         results = {
             "detected_pii": [p.model_dump() for p in detected_piis],
-            "image_labels": image_labels or [],
+            "image_labels": display_labels,
+            "sensitive_visual": sensitive_visual,
+            "attacker_dossier": attacker_dossier,
+            "fiscal_code_info": fiscal_code_info,
             "narrative_summary": narrative_summary,
             "social_engineering_report": [t.model_dump() for t in social_threats],
             "risk_assessment": {
@@ -250,6 +325,8 @@ def run_analysis(analysis_id: str, social_url: str, scraped_content: Optional[st
                 "explanation": risk_explanation,
                 "score": risk_score,
                 "motivations": risk_motivations,
+                "combos": risk_extras["combos"],
+                "repetitions": risk_extras["repetitions"],
             },
             "risk_level": risk_level,
             "risk_score": risk_score,
