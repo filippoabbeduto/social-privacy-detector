@@ -129,3 +129,21 @@ def test_email_non_diventa_nome():
     llm = [PIIEntity(type="NAME", text="mario.rossi@x.it", score=0.0)]
     out = _svc()._merge_ensemble(presidio, llm)
     assert [e.type for e in out] == ["EMAIL"]
+
+
+def test_organizzazione_dentro_dominio_email_non_va_scartata():
+    """Regressione: l'utente scrive "studente alla Sapienza" con email @sapienza.it.
+    L'LLM rileva ORGANIZATION "Sapienza"; la parola vive dentro il dominio dell'email, ma
+    NON è un frammento dell'email — è un'organizzazione vera. Il contenimento contro i dati
+    strutturati deve valere solo per gli username (@handle), non per email/IBAN, altrimenti
+    l'organizzazione spariva a seconda di come l'LLM la scriveva ("Sapienza" vs "Sapienza
+    di Roma")."""
+    presidio = [PIIEntity(type="EMAIL", text="filippo.abb@sapienza.it", score=1.0),
+                PIIEntity(type="LOCATION", text="Roma", score=0.85)]
+    llm = [PIIEntity(type="ORGANIZATION", text="Sapienza", score=0.0),
+           PIIEntity(type="LOCATION", text="Roma", score=0.0)]
+    out = _svc()._merge_ensemble(presidio, llm)
+    orgs = [(e.type, e.text, e.score) for e in out if e.type == "ORGANIZATION"]
+    assert orgs == [("ORGANIZATION", "Sapienza", 0.75)], orgs
+    # l'email resta intatta
+    assert any(e.type == "EMAIL" for e in out)

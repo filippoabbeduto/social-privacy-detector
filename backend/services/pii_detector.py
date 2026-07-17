@@ -406,13 +406,20 @@ class PIIDetectorService:
         llm_fuzzy_keys = {
             key(e) for e in llm_piis if self._canon_type(e.type) in self._FUZZY_TYPES
         }
-        # Testi che Presidio ha già rilevato come dati STRUTTURATI. L'LLM tende a leggere
-        # gli username come nomi di persona ("@mario.rossi" → NAME): sono già USERNAME e
-        # la variante fuzzy va scartata. È la stessa difesa che pii_presidio applica agli
-        # span di spaCy sovrapposti a un dato strutturato, qui estesa all'output dell'LLM.
-        presidio_structured_texts = [
+        # Testi che Presidio ha già rilevato come dati STRUTTURATI (per l'uguaglianza esatta:
+        # l'LLM ha restituito letteralmente un'email/IBAN come se fosse un nome).
+        presidio_structured_texts = {
             e.text.strip().lower()
             for e in presidio_piis if self._canon_type(e.type) not in self._FUZZY_TYPES
+        }
+        # Il CONTENIMENTO (sottostringa) vale SOLO per gli username: l'LLM legge "@mario.rossi"
+        # come NAME "mario.rossi", e la variante fuzzy va scartata. NON per email/IBAN: la
+        # parola "sapienza" vive dentro "filippo.abb@sapienza.it" ma "Sapienza" è
+        # un'organizzazione vera, non un frammento dell'email — con il contenimento esteso a
+        # tutti gli strutturati veniva scartata a seconda di come l'LLM la scriveva.
+        presidio_handle_texts = [
+            e.text.strip().lower().lstrip("@")
+            for e in presidio_piis if self._canon_type(e.type) == "USERNAME"
         ]
 
         # Span fuzzy restituiti dall'LLM, per la verifica per contenimento.
@@ -449,9 +456,13 @@ class PIIDetectorService:
             etext = e.text.strip().lower()
             if etext in presidio_fuzzy_texts:
                 continue  # conflitto di tipo: vince Presidio
-            # Già rilevato come dato strutturato: "@mario.rossi" è USERNAME, non NAME.
-            # Contenimento nei due versi: l'LLM può restituire "mario.rossi" senza la @.
-            if any(etext in s or s in etext for s in presidio_structured_texts):
+            # Uguaglianza esatta contro un dato strutturato (l'LLM ha restituito l'email/IBAN
+            # tale e quale): si scarta.
+            if etext in presidio_structured_texts:
+                continue
+            # Contenimento nei due versi SOLO contro gli username: "@mario.rossi" è USERNAME,
+            # non NAME, e l'LLM può restituirlo senza la @.
+            if any(etext in s or s in etext for s in presidio_handle_texts):
                 continue
             if k in seen_llm_keys:
                 continue  # dedup interno LLM
