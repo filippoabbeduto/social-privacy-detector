@@ -69,7 +69,10 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: spd-jobs
-      VisibilityTimeout: 360
+      # Deve restare > del Timeout della Lambda (600s), altrimenti il messaggio
+      # ridiventa visibile mentre l'analisi e' ancora in corso e un secondo
+      # consumatore la rieseguirebbe in parallelo.
+      VisibilityTimeout: 660
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt SpdDlq.Arn
         maxReceiveCount: 3
@@ -163,7 +166,11 @@ Resources:
       Code:
         ImageUri: !Ref ImageUri
       Role: !GetAtt SpdWorkerRole.Arn
-      Timeout: 300
+      # Un'analisi reale con l'ensemble attivo impiega ~230s (misurato end-to-end:
+      # scraping + OCR + estrazione LLM + rischio + report). Con 300s il margine era
+      # di 70s e una chiamata LLM lenta faceva scadere la funzione a meta' lavoro.
+      # Alzare qui obbliga ad alzare anche VisibilityTimeout della coda (sopra).
+      Timeout: 600
       MemorySize: 1024
       Environment:
         Variables:

@@ -46,10 +46,14 @@ _SYSTEM_PROMPT = (
 def _make_client(base_url: str, api_key: str):
     """Isolato per poter essere sostituito nei test (monkeypatch)."""
     from openai import OpenAI
-    # Timeout allineato ad attack_example: gpt-oss è un modello "reasoning" e su free
-    # tier impiega ~10s anche su testi brevi. Con 8s ogni bio non banale andava in
-    # timeout e l'ensemble degradava a Presidio puro senza che si vedesse.
-    return OpenAI(api_key=api_key or "not-needed", base_url=base_url, timeout=45.0)
+    # gpt-oss è un modello "reasoning": ragiona prima di rispondere, e con
+    # max_tokens=16384 (vedi sotto) il ragionamento è lungo. Misurato su un profilo
+    # reale, 2 esecuzioni: 41,8s e 28,1s. Con il vecchio timeout di 45s il margine
+    # era di 3 secondi: una chiamata appena più lenta scadeva, detect_pii_llm
+    # tornava None e l'ensemble degradava a Presidio SENZA che si vedesse dal report.
+    # 90s non rallenta il caso normale (il timeout scatta solo se serve) e toglie
+    # quel margine di 3 secondi fra noi e un falso negativo silenzioso.
+    return OpenAI(api_key=api_key or "not-needed", base_url=base_url, timeout=90.0)
 
 
 def detect_pii_llm(text: str):
