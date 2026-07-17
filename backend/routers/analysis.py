@@ -306,17 +306,23 @@ def sanitize_bio(payload: SanitizeRequest):
     ripulito e ricalcola il rischio. Trasforma il referto in un rimedio concreto: l'utente
     esce con un testo pubblicabile e vede di quanto scende lo score.
 
-    Sincrono: una chiamata LLM + regex, nessuno scraping/coda → adatto al click.
+    Sincrono, deve stare in un click. La RILEVAZIONE usa Presidio-solo (deterministico,
+    ~1s), NON l'ensemble: con l'estrazione LLM attiva ogni detect_pii costa 30-40s, e qui
+    se ne facevano DUE — l'endpoint sforava il timeout del reverse proxy (502/504). Presidio
+    cattura comunque tutti i dati strutturati ad alto rischio (email, IBAN, CF, telefono),
+    che sono quelli che dominano lo score e che la bonifica deve togliere per primi. L'LLM
+    resta dove serve davvero: riscrivere la bio in modo naturale (report_service).
     """
     text = (payload.text or "").strip()[:MAX_BIO_CHARS]
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Testo vuoto.")
 
-    original_piis = pii_service.detect_pii(text)
+    from services.pii_presidio import detect_pii_presidio
     from services.risk_scorer import plan_sanitization
+    original_piis = detect_pii_presidio(text)
     plan = plan_sanitization(original_piis)
     cleaned = report_service.sanitize_bio(text, plan["to_remove"])
-    cleaned_piis = pii_service.detect_pii(cleaned)
+    cleaned_piis = detect_pii_presidio(cleaned)
     risk_level, _, score, _ = build_risk_assessment(cleaned_piis)
 
     logger.info(f"[Sanitize] mirata: rimossi {len(plan['to_remove'])}/{len(original_piis)} "
