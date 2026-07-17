@@ -371,9 +371,9 @@ report --- sintesi narrativa e vettori di attacco --- è l'unica funzionalità a
 un servizio \emph{non} AWS. La scelta iniziale era \textbf{Amazon Bedrock} (modello
 Claude); tuttavia, su un account AWS di prova la quota di invocazione \emph{on-demand} di
 Bedrock risultava non provisionata e la richiesta di sblocco, inoltrata al supporto AWS,
-non è stata evasa in tempo utile. Previa autorizzazione del docente all'uso di un'API LLM
-esterna, si è quindi implementato \textbf{Google Gemini} (\texttt{gemini-2.5-flash}),
-invocato tramite un endpoint \emph{OpenAI-compatible}. Il modulo è \emph{switchable}
+non è stata evasa in tempo utile. Come \textbf{scelta implementativa} si è quindi optato per
+\textbf{Google Gemini} (\texttt{gemini-2.5-flash}), invocato tramite un endpoint
+\emph{OpenAI-compatible}. Il modulo è \emph{switchable}
 (variabile d'ambiente \texttt{REPORT\_PROVIDER}: \texttt{gemini} o \texttt{mock}) e la sua
 architettura a provider intercambiabili è predisposta per accogliere un provider
 aggiuntivo: l'integrazione futura di Bedrock richiederebbe soltanto l'aggiunta di un
