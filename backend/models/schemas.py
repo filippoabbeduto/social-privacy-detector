@@ -61,8 +61,18 @@ class RescoreRequest(BaseModel):
 
 
 class SanitizeRequest(BaseModel):
-    """Richiesta di riscrittura sicura di una biografia."""
+    """Richiesta di riscrittura sicura di una biografia.
+
+    Il client passa le PII gia' rilevate dall'analisi (come /rescore e /leverage):
+    cosi' il backend NON ri-esegue il NER locale. Il modello spaCy pesa ~600 MB e la
+    detection non deve girare nel web tier (t3.micro condivisa con frontend e nginx),
+    dove satura la RAM e blocca il worker — le analisi girano apposta nella Lambda.
+    Se la lista e' assente, si ricade sul rilevamento locale (path lento, solo per
+    uso standalone dell'API)."""
     text: str = Field(..., description="Testo della bio da ripulire dalle PII")
+    detected_pii: List[PIIEntity] = Field(
+        default_factory=list,
+        description="PII gia' rilevate dall'analisi; se vuota il backend le rileva da se'")
 
 
 class SanitizeResponse(BaseModel):

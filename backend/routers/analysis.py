@@ -306,24 +306,30 @@ def sanitize_bio(payload: SanitizeRequest):
     ripulito e ricalcola il rischio. Trasforma il referto in un rimedio concreto: l'utente
     esce con un testo pubblicabile e vede di quanto scende lo score.
 
-    Sincrono, deve stare in un click. La RILEVAZIONE usa Presidio-solo (deterministico,
-    ~1s), NON l'ensemble: con l'estrazione LLM attiva ogni detect_pii costa 30-40s, e qui
-    se ne facevano DUE — l'endpoint sforava il timeout del reverse proxy (502/504). Presidio
-    cattura comunque tutti i dati strutturati ad alto rischio (email, IBAN, CF, telefono),
-    che sono quelli che dominano lo score e che la bonifica deve togliere per primi. L'LLM
-    resta dove serve davvero: riscrivere la bio in modo naturale (report_service).
+    Sincrono, deve stare in un click e girare su una t3.micro da 1 GB. Il backend NON
+    rileva le PII: il client passa quelle gia' trovate dall'analisi (girata nella Lambda),
+    come fanno /rescore e /leverage. Rilevare qui vorrebbe dire caricare spaCy (~600 MB)
+    nel web tier, che satura la RAM e blocca il worker (healthcheck fallisce -> il container
+    si riavvia -> 502). Cosi' l'endpoint fa solo logica pura (pianificazione + punteggio) +
+    la riscrittura via LLM remoto (Gemini): niente modello locale.
+
+    Lo score del testo ripulito si calcola dai dati TENUTI dal piano (deterministico), non
+    ri-rilevando: e' esattamente cio' per cui la bonifica ha ottimizzato. Se il client non
+    passa le PII (uso standalone dell'API) si ricade sul rilevamento locale, path lento.
     """
     text = (payload.text or "").strip()[:MAX_BIO_CHARS]
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Testo vuoto.")
 
-    from services.pii_presidio import detect_pii_presidio
     from services.risk_scorer import plan_sanitization
-    original_piis = detect_pii_presidio(text)
+    original_piis = list(payload.detected_pii)
+    if not original_piis:  # fallback standalone: nessuna PII fornita, rileva localmente
+        from services.pii_presidio import detect_pii_presidio
+        original_piis = detect_pii_presidio(text)
     plan = plan_sanitization(original_piis)
     cleaned = report_service.sanitize_bio(text, plan["to_remove"])
-    cleaned_piis = detect_pii_presidio(cleaned)
-    risk_level, _, score, _ = build_risk_assessment(cleaned_piis)
+    # Score dai dati TENUTI: nessuna ri-rilevazione (niente spaCy nel web tier).
+    risk_level, _, score, _ = build_risk_assessment(plan["to_keep"])
 
     logger.info(f"[Sanitize] mirata: rimossi {len(plan['to_remove'])}/{len(original_piis)} "
                 f"dati (target BASSO), score effettivo {score} ({risk_level})")

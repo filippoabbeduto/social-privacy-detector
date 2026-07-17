@@ -62,3 +62,27 @@ def test_sanitize_endpoint_targets_low(monkeypatch):
     assert body["risk_level"] == "LOW"
     assert body["kept_types"]           # qualcosa è stato mantenuto (non azzerato)
     assert "FISCAL_CODE" in body["removed_types"]
+
+
+def test_sanitize_usa_pii_fornite_senza_rilevare(monkeypatch):
+    """L'endpoint deve usare le PII passate dal client e NON chiamare il NER locale
+    (spaCy pesa troppo per il web tier: rilevare qui bloccava il worker -> 502)."""
+    from routers import analysis
+    from models.schemas import SanitizeRequest, PIIEntity
+
+    # se qualcuno chiama detect_pii_presidio, il test fallisce
+    def _boom(*a, **k):
+        raise AssertionError("detect_pii_presidio NON deve essere chiamato con PII fornite")
+    monkeypatch.setattr("services.pii_presidio.detect_pii_presidio", _boom)
+
+    req = SanitizeRequest(
+        text="Marco Rossi, marco@x.it, IBAN IT60X0542811101000000123456",
+        detected_pii=[PIIEntity(type="EMAIL", text="marco@x.it", score=1.0),
+                      PIIEntity(type="IBAN", text="IT60X0542811101000000123456", score=1.0),
+                      PIIEntity(type="NAME", text="Marco Rossi", score=0.95)],
+    )
+    # Se arriva qui, _boom NON e' scattato: il NER locale non e' stato chiamato (il punto).
+    resp = analysis.sanitize_bio(req)
+    assert resp.risk_level == "LOW"           # la bonifica porta a rischio basso
+    assert "IBAN" in resp.removed_types        # rimuove il dato piu' pericoloso
+    assert resp.cleaned_text                   # ha prodotto un testo

@@ -654,7 +654,9 @@ export default function App() {
       const res = await fetch("/api/sanitize-bio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: source.text }),
+        // Passa le PII gia' rilevate: il backend non ri-esegue il NER (spaCy pesa troppo
+        // per il web tier). Vedi SanitizeRequest.
+        body: JSON.stringify({ text: source.text, detected_pii: result?.detected_pii || [] }),
       });
       if (res.ok) setSanitized(await res.json());
     } catch (err) {
