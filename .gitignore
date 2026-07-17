@@ -58,3 +58,9 @@ relazione/*.aux
 relazione/*.log
 relazione/*.out
 relazione/*.toc
+
+# Consegna: nel repository va SOLO la relazione in PDF, non la sua fonte.
+# I file restano in locale per poter ricompilare il documento.
+relazione/relazione.tex
+relazione/relazione.bib
+relazione/img/

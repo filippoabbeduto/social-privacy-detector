@@ -114,9 +114,7 @@ social-privacy-detector/
 │   ├── gha-deploy-policy.json  # Permessi IAM della pipeline CI
 │   └── cleanup.sh              # Smontaggio risorse AWS
 ├── relazione/
-│   ├── relazione.pdf           # Relazione (deliverable)
-│   ├── relazione.tex           # Sorgente LaTeX
-│   └── img/                    # Figure (grafici CloudWatch, loghi)
+│   └── relazione.pdf           # Relazione (deliverable)
 ├── report-esempio/             # Tre report d'esempio (rischio alto/medio/basso)
 ├── fonti/                      # Report di settore consultati (IC3, DBIR, Proofpoint, NIST)
 ├── docker-compose.yml          # Orchestrazione 3 container (sviluppo)
