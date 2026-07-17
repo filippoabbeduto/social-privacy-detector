@@ -992,7 +992,7 @@ export default function App() {
       );
     }
 
-    heading(`Vettori di ingegneria sociale (${threats.length})`);
+    heading(`Vettori di Social Engineering (${threats.length})`);
     threats.forEach((t) => {
       write(`[${t.severity}]  ${t.threat_vector}`, 10.5, true, [40, 40, 40]);
       write(t.explanation, 10, false, [70, 70, 70]);
@@ -1058,12 +1058,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Gruppo destro: stato AWS + tab (da tablet in su) + tema */}
+            {/* Gruppo destro: tab (da tablet in su) + tema */}
             <div className="flex items-center gap-2.5 shrink-0">
-              <span className="hidden md:flex items-center gap-1.5 text-xs text-muted border border-line rounded-full px-3 py-1.5 bg-surface">
-                <span className="w-1.5 h-1.5 rounded-full bg-low" />
-                AWS · us-east-1
-              </span>
               <ModeTabs mode={mode} onSelect={selectMode} className="hidden sm:flex" />
               <button
                 type="button"
@@ -1346,32 +1342,20 @@ export default function App() {
               </div>
             )}
 
-            {/* Motore (crediti onesti).
-                NOTA: testo statico, allineato a mano alla configurazione di default
-                (PII_PROVIDER=presidio|ensemble, REPORT_PROVIDER=gemini). Se si cambia
-                il motore via env, AGGIORNARE QUI: il pannello non lo rileva da solo. */}
+            {/* Uso consentito. Sta sotto il form, non nel footer: va letta prima di
+                avviare un'analisi, non dopo. */}
             <div className="rounded-2xl border border-line bg-surface shadow-soft p-6 text-sm">
-              <span className="block text-[11px] uppercase tracking-wider text-muted font-semibold mb-3">
-                Motore di analisi
+              <span className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted font-semibold mb-3">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                Uso consentito
               </span>
-              <dl className="space-y-2 text-muted">
-                <div className="flex justify-between gap-4">
-                  <dt>Rilevamento dati personali</dt>
-                  <dd className="text-ink font-mono text-xs text-right">Presidio · ensemble LLM</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt>Report minacce</dt>
-                  <dd className="text-ink font-mono text-xs text-right">Gemini · fallback Ollama</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt>Visione · OCR</dt>
-                  <dd className="text-ink font-mono text-xs text-right">Rekognition · Textract</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt>Persistenza</dt>
-                  <dd className="text-ink font-mono text-xs text-right">DynamoDB · S3</dd>
-                </div>
-              </dl>
+              <p className="text-muted leading-relaxed">
+                La piattaforma è destinata <span className="text-ink font-semibold">esclusivamente
+                all'analisi dei propri dati personali</span>. L'acquisizione e l'analisi di dati
+                personali di terzi esulano dalle finalità del servizio e ricadono sotto la
+                responsabilità esclusiva di chi le effettua, non dello sviluppatore della
+                piattaforma.
+              </p>
             </div>
           </div>
 
@@ -1973,7 +1957,7 @@ export default function App() {
                 {/* Vettori d'attacco */}
                 {threats.length > 0 && (
                   <div className="rise rounded-2xl border border-line bg-surface shadow-soft p-6" style={{ animationDelay: "0.12s" }}>
-                    <h3 className="font-display font-bold mb-1">Vettori di ingegneria sociale</h3>
+                    <h3 className="font-display font-bold mb-1">Vettori di Social Engineering</h3>
                     <p className="text-sm text-muted mb-4">Come i dati esposti potrebbero essere sfruttati per un attacco mirato.</p>
                     <div className="space-y-3">
                       {threats.map((t, idx) => (
