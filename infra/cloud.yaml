@@ -29,6 +29,12 @@ Parameters:
       template NON riceve la chiave in chiaro: solo il nome. Il valore cifrato va
       creato una volta con: aws ssm put-parameter --name /spd/gemini-api-key
       --type SecureString --value <chiave>
+  PiiLlmKeySsmParam:
+    Type: String
+    Default: "/spd/pii-llm-key"
+    Description: >
+      Nome del parametro SSM (SecureString) con la API key dell'LLM esterno usato
+      da PII_PROVIDER=ensemble. Come per Gemini, il template riceve solo il nome.
   AlarmEmail:
     Type: String
     Default: ""
@@ -113,7 +119,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GeminiKeySsmParam}"
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GeminiKeySsmParam}"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PiiLlmKeySsmParam}"
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -154,6 +162,13 @@ Resources:
           REPORT_PROVIDER: "gemini"
           GEMINI_API_KEY_SSM: !Ref GeminiKeySsmParam
           ENABLE_REKOGNITION: "true"
+          MAX_POST_IMAGES_OCR: "6"
+          RISK_MODEL: "empirical"
+          PII_PROVIDER: "ensemble"
+          PII_LLM_BASE_URL: "https://ollama.com/v1"
+          PII_LLM_MODEL: "gpt-oss:20b"
+          GEN_LLM_MODEL: "gpt-oss:120b"
+          PII_LLM_API_KEY_SSM: !Ref PiiLlmKeySsmParam
 
   # Collega la coda alla Lambda (event source mapping). ReportBatchItemFailures
   # abilita la partial batch response: solo i messaggi falliti tornano in coda.
