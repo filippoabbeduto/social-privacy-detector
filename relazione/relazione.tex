@@ -159,6 +159,25 @@ impiegate.
 La Tabella~\ref{tab:req} riepiloga i requisiti della traccia e come sono stati
 soddisfatti, così da rendere immediata la verifica della \emph{rispondenza}.
 
+
+La matrice copre i requisiti \emph{obbligatori} della traccia --- raccolta dei contenuti
+pubblici, estrazione delle PII da testo e immagini, report con AI generativa, assegnazione
+del livello di rischio, uso effettivo di AWS per calcolo/storage/virtualizzazione e demo
+funzionante --- ai quali si aggiungono alcune funzionalità che ne estendono la portata e
+costituiscono elementi di originalità: un \textbf{modello di rischio empirico}
+(Rischio = Probabilità $\times$ Impatto) con pesi ancorati a report di settore (IC3,
+DBIR, Proofpoint) su framework NIST SP 800-30, in luogo di pesi arbitrari; un
+\textbf{estrattore PII deterministico e locale} (Presidio + spaCy italiano) con
+post-processing dedicato, scelto a valle di un \textbf{confronto sperimentale}
+documentato con Amazon Comprehend; il rilevamento dei codici identificativi italiani
+(codice fiscale, IBAN), la doppia modalità di OCR (pre-pubblicazione e retrospettiva sulle
+immagini dei post), un'\textbf{elaborazione distribuita} produttore/consumatore su SQS +
+Lambda con osservabilità CloudWatch e provisioning \emph{Infrastructure as Code}, un'interfaccia
+orientata alla \textbf{spiegazione} del rischio (mappa dell'aggregazione, rescore
+controfattuale, bio sanitizzata, onestà sull'incertezza) e un insieme di scelte infrastrutturali (containerizzazione, CI/CD,
+reverse proxy, HTTPS) motivate nel Cap.~\ref{sec:extra}. I capitoli seguenti spiegano nel dettaglio
+ciascun elemento della tabella.
+
 \begin{table}[htbp]
 \centering
 \footnotesize
@@ -182,24 +201,6 @@ Documentazione uso di AI generativa & Sezione dedicata (Cap.~\ref{sec:ai}). \\
 \caption{Matrice di rispondenza ai requisiti.}
 \label{tab:req}
 \end{table}
-
-La matrice copre i requisiti \emph{obbligatori} della traccia --- raccolta dei contenuti
-pubblici, estrazione delle PII da testo e immagini, report con AI generativa, assegnazione
-del livello di rischio, uso effettivo di AWS per calcolo/storage/virtualizzazione e demo
-funzionante --- ai quali si aggiungono alcune funzionalità che ne estendono la portata e
-costituiscono elementi di originalità: un \textbf{modello di rischio empirico}
-(Rischio = Probabilità $\times$ Impatto) con pesi ancorati a report di settore (IC3,
-DBIR, Proofpoint) su framework NIST SP 800-30, in luogo di pesi arbitrari; un
-\textbf{estrattore PII deterministico e locale} (Presidio + spaCy italiano) con
-post-processing dedicato, scelto a valle di un \textbf{confronto sperimentale}
-documentato con Amazon Comprehend; il rilevamento dei codici identificativi italiani
-(codice fiscale, IBAN), la doppia modalità di OCR (pre-pubblicazione e retrospettiva sulle
-immagini dei post), un'\textbf{elaborazione distribuita} produttore/consumatore su SQS +
-Lambda con osservabilità CloudWatch e provisioning \emph{Infrastructure as Code}, un'interfaccia
-orientata alla \textbf{spiegazione} del rischio (mappa dell'aggregazione, rescore
-controfattuale, bio sanitizzata, onestà sull'incertezza) e un insieme di scelte infrastrutturali (containerizzazione, CI/CD,
-reverse proxy, HTTPS) motivate nel Cap.~\ref{sec:extra}. I capitoli seguenti spiegano nel dettaglio
-ciascun elemento della tabella.
 
 % ==============================================================================
 \section{Architettura del sistema}
