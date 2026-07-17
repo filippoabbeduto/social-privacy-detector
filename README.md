@@ -118,7 +118,7 @@ social-privacy-detector/
 │   ├── relazione.tex           # Sorgente LaTeX
 │   └── img/                    # Figure (grafici CloudWatch, loghi)
 ├── report-esempio/             # Tre report d'esempio (rischio alto/medio/basso)
-├── report/                     # Report di settore consultati (IC3, DBIR, Proofpoint, NIST)
+├── fonti/                      # Report di settore consultati (IC3, DBIR, Proofpoint, NIST)
 ├── docker-compose.yml          # Orchestrazione 3 container (sviluppo)
 ├── docker-compose.prod.yml     # Orchestrazione produzione (immagini ECR)
 ├── nginx.conf                  # Reverse proxy principale
