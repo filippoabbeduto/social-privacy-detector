@@ -19,6 +19,7 @@
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds}
 \usepackage[hidelinks]{hyperref}
+\usepackage{placeins}  % \FloatBarrier: impedisce ai float di scavalcare una sezione
 \usepackage{fancyhdr}
 
 % --- Colori ---
@@ -60,7 +61,7 @@
 % segnaposto (così la relazione compila anche prima di aver acquisito gli screenshot).
 % Uso: \screenshot{img/file.png}{larghezza 0-1}{didascalia}{label}
 \newcommand{\screenshot}[4]{%
-  \begin{figure}[h]\centering
+  \begin{figure}[htbp]\centering
   \IfFileExists{#1}%
     {\includegraphics[width=#2\linewidth]{#1}}%
     {\fbox{\parbox[c][4cm][c]{#2\linewidth}{\centering\itshape\color{gray}%
@@ -249,7 +250,7 @@ generazione del report, un servizio LLM esterno (Google Gemini) via HTTPS. Si
 delinea così una netta separazione: un unico componente affacciato verso l'esterno,
 mentre logica applicativa e storage restano isolati.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[
   node distance=0.9cm and 1.4cm,
@@ -288,6 +289,7 @@ mentre logica applicativa e storage restano isolati.
 \label{fig:arch}
 \end{figure}
 
+\FloatBarrier
 \subsection{I microservizi}
 \paragraph{Reverse proxy (Nginx).} Agisce da \emph{edge router} e punto d'ingresso
 unico. Effettua \emph{path-based routing}: le richieste \texttt{/api/*} vanno al
@@ -431,7 +433,7 @@ risultato della propria richiesta: si tratta di una forma di consistenza
 \emph{read-your-writes} sufficiente per il caso d'uso. La Figura~\ref{fig:async}
 illustra questa interazione.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[font=\footnotesize,>=Stealth,yscale=0.85]
   \node[draw,rounded corners,fill=accent!10] (C) at (0,0)    {Client};
@@ -489,7 +491,7 @@ marcato \texttt{FAILED} e il messaggio consumato, senza retry inutili) ed errori
 \emph{infrastrutturali} (che risalgono e attivano la riconsegna) è gestita in modo
 esplicito. La Figura~\ref{fig:worker-modes} sintetizza i due percorsi.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[font=\footnotesize,>=Stealth,node distance=6mm,
                     every node/.style={align=center}]
