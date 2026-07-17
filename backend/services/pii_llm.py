@@ -81,9 +81,17 @@ def detect_pii_llm(text: str):
             response_format={"type": "json_object"},
             temperature=0,
             # Un modello reasoning spende token per ragionare PRIMA di emettere il JSON:
-            # con 1024 il budget finisce nel ragionamento e il contenuto torna VUOTO
-            # (finish_reason="length"). Serve margine per il JSON di una bio lunga.
-            max_tokens=4096,
+            # se il budget finisce nel ragionamento il contenuto torna VUOTO
+            # (finish_reason="length") e l'ensemble degrada a Presidio in silenzio.
+            # Il costo del ragionamento NON scala col testo: misurato su un profilo
+            # reale di soli 737 caratteri (bio + didascalie + OCR), 3 esecuzioni:
+            #   4096  -> finish_reason=length, contenuto VUOTO
+            #   8192  -> finish_reason=length, JSON troncato a meta'
+            #   16384 -> finish_reason=stop, JSON completo
+            # 4096 bastava solo sulle frasi brevi dei test: su ogni profilo vero
+            # l'estrazione LLM veniva saltata, e i report mostravano i fuzzy a 0.85
+            # (Presidio da solo) invece di 0.95. Non abbassare senza rimisurare.
+            max_tokens=16384,
         )
         choice = resp.choices[0]
         if choice.finish_reason == "length":

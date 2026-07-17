@@ -120,6 +120,10 @@ Resources:
                   - comprehend:DetectPiiEntities
                   - textract:DetectDocumentText
                   - rekognition:DetectLabels
+                  # DetectFaces (solo AGE_RANGE) serve alla segnalazione dei minori:
+                  # senza questo permesso la Lambda logga AccessDenied per ogni
+                  # immagine e la categoria MINORI non viene mai rilevata.
+                  - rekognition:DetectFaces
                 Resource: "*"  # questi servizi non supportano restrizione per-risorsa
               # Lettura della API key Gemini da SSM Parameter Store (SecureString):
               # GetParameter sul parametro specifico + Decrypt (chiave KMS gestita da AWS).
