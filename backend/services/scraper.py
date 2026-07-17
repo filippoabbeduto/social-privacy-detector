@@ -19,6 +19,8 @@ import re
 import logging
 from typing import Optional, List, Dict, Any, Tuple
 
+from services.secret_resolver import resolve_secret
+
 logger = logging.getLogger("social-privacy-backend")
 
 AWS_MOCK = os.getenv("AWS_MOCK", "true").lower() == "true"
@@ -251,7 +253,13 @@ class ScraperService:
     SUPPORTED_PLATFORMS = list(PLATFORM_CONFIGS.keys())
 
     def __init__(self):
-        self.apify_token = os.getenv("APIFY_API_TOKEN", "")
+        # Come le altre chiavi: valore diretto dall'ambiente, altrimenti SSM
+        # SecureString. In produzione il token non sta in chiaro nella config.
+        self.apify_token = resolve_secret(
+            os.getenv("APIFY_API_TOKEN", ""),
+            os.getenv("APIFY_API_TOKEN_SSM", ""),
+            AWS_MOCK,
+        )
         self.apify_base_url = "https://api.apify.com/v2"
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -272,7 +280,22 @@ class ScraperService:
         poi passare le immagini a Textract per l'OCR retrospettivo. In mock mode
         restituisce (testo simulato, []) — nessuna immagine da scaricare.
         """
-        if AWS_MOCK or not self.apify_token or self.apify_token == "mock_apify_token":
+        token_mancante = not self.apify_token or self.apify_token == "mock_apify_token"
+
+        # Fuori da AWS_MOCK i dati simulati sono VIETATI. Senza questa guardia un
+        # token assente faceva ricadere la produzione sulle bio finte di
+        # _scrape_mock, che sceglie per parola chiave nell'URL: un profilo reale
+        # con "filippo" nell'indirizzo si vedeva restituire PII inventate come se
+        # fossero state estratte davvero. Meglio un errore esplicito che
+        # un'analisi credibile e falsa.
+        if token_mancante and not AWS_MOCK:
+            raise RuntimeError(
+                "APIFY_API_TOKEN assente con AWS_MOCK=false: lo scraping reale non è "
+                "possibile. Configurare il token (o APIFY_API_TOKEN_SSM). Nessun dato "
+                "simulato viene restituito in produzione."
+            )
+
+        if AWS_MOCK or token_mancante:
             return self._scrape_mock(social_url), []
         return self._scrape_apify(social_url)
 

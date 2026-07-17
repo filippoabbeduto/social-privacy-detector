@@ -107,7 +107,7 @@ social-privacy-detector/
 │   │   ├── pipeline.py         # Pipeline di analisi condivisa (thread in-process / Lambda)
 │   │   ├── scraper.py          # Scraping social (Apify)
 │   │   └── storage.py          # Persistenza (DynamoDB+S3 / in-memory mock)
-│   └── tests/                  # Suite pytest (174 test)
+│   └── tests/                  # Suite pytest (176 test)
 ├── infra/
 │   ├── cloud.yaml              # IaC CloudFormation (SQS+DLQ+Lambda+CloudWatch)
 │   ├── oidc-trust.json         # Trust OIDC per il ruolo di deploy (no chiavi statiche)

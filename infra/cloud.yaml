@@ -35,6 +35,13 @@ Parameters:
     Description: >
       Nome del parametro SSM (SecureString) con la API key dell'LLM esterno usato
       da PII_PROVIDER=ensemble. Come per Gemini, il template riceve solo il nome.
+  ApifyTokenSsmParam:
+    Type: String
+    Default: "/spd/apify-token"
+    Description: >
+      Nome del parametro SSM (SecureString) col token Apify. Senza token la Lambda
+      non puo' fare scraping reale: con AWS_MOCK=false il codice ora solleva un
+      errore esplicito invece di ricadere sulle bio simulate.
   AlarmEmail:
     Type: String
     Default: ""
@@ -122,6 +129,7 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GeminiKeySsmParam}"
                   - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PiiLlmKeySsmParam}"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApifyTokenSsmParam}"
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -169,6 +177,7 @@ Resources:
           PII_LLM_MODEL: "gpt-oss:20b"
           GEN_LLM_MODEL: "gpt-oss:120b"
           PII_LLM_API_KEY_SSM: !Ref PiiLlmKeySsmParam
+          APIFY_API_TOKEN_SSM: !Ref ApifyTokenSsmParam
 
   # Collega la coda alla Lambda (event source mapping). ReportBatchItemFailures
   # abilita la partial batch response: solo i messaggi falliti tornano in coda.
