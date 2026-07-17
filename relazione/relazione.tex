@@ -334,33 +334,6 @@ serve sia lo sviluppo locale sia la produzione.
 % ==============================================================================
 \section{Servizi AWS utilizzati}
 % ==============================================================================
-\begin{table}[htbp]
-\centering
-\footnotesize
-\renewcommand{\arraystretch}{1.25}
-\begin{tabular}{p{3.2cm} p{11.2cm}}
-\toprule
-\textbf{Servizio} & \textbf{Ruolo nel sistema} \\
-\midrule
-Amazon EC2 & Istanza \texttt{t3.micro} (Amazon Linux 2023) che ospita i container Docker (calcolo/virtualizzazione). \\
-Amazon Comprehend & Estrattore PII \emph{alternativo} (\texttt{DetectPiiEntities} + \texttt{DetectEntities}), commutabile via \texttt{PII\_PROVIDER}; l'estrattore di default è Presidio, locale. \\
-Amazon Textract & OCR: estrazione del testo visibile nelle immagini (\texttt{DetectDocumentText}). \\
-Amazon Rekognition & Visione: etichette di oggetti/scene/luoghi nelle immagini (\texttt{DetectLabels}) per l'esposizione visiva; stima dell'età dei volti (\texttt{DetectFaces}, solo \texttt{AGE\_RANGE}) per segnalare i minori. \\
-Amazon DynamoDB & Persistenza dello storico delle analisi (tabella \texttt{SocialPrivacyAnalyses}). \\
-Amazon S3 & Archiviazione dei report generati (bucket \texttt{social-privacy-reports}). \\
-Amazon ECR & Registry privato delle immagini Docker per il deployment (immagini del frontend, del backend e della funzione Lambda). \\
-Amazon SQS & Coda di messaggi per l'elaborazione distribuita produttore/consumatore (\texttt{spd-jobs}), con \emph{dead-letter queue} per i messaggi non processabili. \\
-AWS Lambda & Consumatore \emph{serverless} event-driven della coda: esegue la pipeline di analisi su trigger SQS (immagine container). \\
-Amazon CloudWatch & Osservabilità: metriche custom, \emph{dashboard}, log della Lambda e allarme sulla \emph{dead-letter queue}. \\
-Amazon SNS & Notifica via e-mail degli allarmi (superamento della soglia sulla \emph{dead-letter queue}). \\
-AWS CloudFormation & \emph{Infrastructure as Code}: provisioning dichiarativo dello stack distribuito (coda, DLQ, Lambda, ruolo IAM, dashboard, allarme). \\
-AWS Systems Manager (SSM) & \emph{Parameter Store} (\texttt{SecureString}) per le API key degli LLM (report e estrazione), cifrate e lette a runtime senza esporle in chiaro. \\
-AWS IAM & Utente di sviluppo; \emph{Instance Profile} sull'EC2 e ruolo dedicato per la Lambda (accesso ai servizi senza chiavi sul disco); ruolo assunto via \textbf{OIDC} dalla pipeline CI, senza chiavi statiche. \\
-\bottomrule
-\end{tabular}
-\caption{Servizi AWS impiegati e loro ruolo.}
-\label{tab:aws}
-\end{table}
 
 Tutte le invocazioni ai servizi AWS avvengono tramite l'SDK ufficiale \textbf{Boto3}; la
 regione di riferimento è \texttt{us-east-1}, in cui sono attivi i servizi gestiti
@@ -403,6 +376,35 @@ addestramento, versionamento dei modelli, monitoraggio del \emph{data drift} e
 ri-addestramento --- con la relativa infrastruttura e strumentazione, che esulano dagli
 obiettivi del progetto.
 
+\begin{table}[htbp]
+\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{p{3.2cm} p{11.2cm}}
+\toprule
+\textbf{Servizio} & \textbf{Ruolo nel sistema} \\
+\midrule
+Amazon EC2 & Istanza \texttt{t3.micro} (Amazon Linux 2023) che ospita i container Docker (calcolo/virtualizzazione). \\
+Amazon Comprehend & Estrattore PII \emph{alternativo} (\texttt{DetectPiiEntities} + \texttt{DetectEntities}), commutabile via \texttt{PII\_PROVIDER}; l'estrattore di default è Presidio, locale. \\
+Amazon Textract & OCR: estrazione del testo visibile nelle immagini (\texttt{DetectDocumentText}). \\
+Amazon Rekognition & Visione: etichette di oggetti/scene/luoghi nelle immagini (\texttt{DetectLabels}) per l'esposizione visiva; stima dell'età dei volti (\texttt{DetectFaces}, solo \texttt{AGE\_RANGE}) per segnalare i minori. \\
+Amazon DynamoDB & Persistenza dello storico delle analisi (tabella \texttt{SocialPrivacyAnalyses}). \\
+Amazon S3 & Archiviazione dei report generati (bucket \texttt{social-privacy-reports}). \\
+Amazon ECR & Registry privato delle immagini Docker per il deployment (immagini del frontend, del backend e della funzione Lambda). \\
+Amazon SQS & Coda di messaggi per l'elaborazione distribuita produttore/consumatore (\texttt{spd-jobs}), con \emph{dead-letter queue} per i messaggi non processabili. \\
+AWS Lambda & Consumatore \emph{serverless} event-driven della coda: esegue la pipeline di analisi su trigger SQS (immagine container). \\
+Amazon CloudWatch & Osservabilità: metriche custom, \emph{dashboard}, log della Lambda e allarme sulla \emph{dead-letter queue}. \\
+Amazon SNS & Notifica via e-mail degli allarmi (superamento della soglia sulla \emph{dead-letter queue}). \\
+AWS CloudFormation & \emph{Infrastructure as Code}: provisioning dichiarativo dello stack distribuito (coda, DLQ, Lambda, ruolo IAM, dashboard, allarme). \\
+AWS Systems Manager (SSM) & \emph{Parameter Store} (\texttt{SecureString}) per le API key degli LLM (report e estrazione), cifrate e lette a runtime senza esporle in chiaro. \\
+AWS IAM & Utente di sviluppo; \emph{Instance Profile} sull'EC2 e ruolo dedicato per la Lambda (accesso ai servizi senza chiavi sul disco); ruolo assunto via \textbf{OIDC} dalla pipeline CI, senza chiavi statiche. \\
+\bottomrule
+\end{tabular}
+\caption{Servizi AWS impiegati e loro ruolo.}
+\label{tab:aws}
+\end{table}
+
+\FloatBarrier
 \paragraph{Modelli di storage e consistenza.} Lo storico delle analisi è persistito su
 \textbf{DynamoDB}, un archivio \emph{chiave-valore} non relazionale in cui ogni record è
 indirizzato dalla chiave primaria \texttt{analysis\_id}; i report sono archiviati su
