@@ -505,7 +505,9 @@ esplicito. La Figura~\ref{fig:worker-modes} sintetizza i due percorsi.
   \draw[->] (A.south) |- node[pos=0.75,above]{\scriptsize sqs} (Q.west);
   \draw[->] (Q) -- node[above]{\scriptsize trigger} (L);
   \draw[->] (T) -- (D);
-  \draw[->] (L) -| (D);
+  % da L.north a D.south: prima era '(L) -| (D)', che partendo dal CENTRO del nodo
+  % tracciava la linea orizzontale ATTRAVERSO il riquadro, barrando 'consumatore'.
+  \draw[->] (L.north) -- (D.south);
   \node[gray,below=1mm of Q] {\scriptsize + DLQ (poison message)};
 \end{tikzpicture}
 \caption{Le due modalità del consumatore selezionabili via \texttt{WORKER\_MODE}: thread in-process (sinistra) o coda SQS con Lambda event-driven e DLQ (in basso). Entrambe eseguono la stessa pipeline e scrivono su DynamoDB/S3.}
