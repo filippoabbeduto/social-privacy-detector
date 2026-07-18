@@ -1448,6 +1448,15 @@ export default function App() {
                     </React.Fragment>
                   ))}
                 </div>
+                {/* Annulla = smetti di aspettare. Ferma il polling e torna al form; l'analisi
+                    prosegue lato Lambda (non la si uccide), ma l'utente non resta bloccato. */}
+                <button
+                  type="button"
+                  onClick={() => { stopPolling(); resetOutcome(); }}
+                  className="mt-6 inline-flex items-center gap-1.5 rounded-xl border border-line py-1.5 px-4 text-xs font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Annulla analisi
+                </button>
               </div>
             )}
 
