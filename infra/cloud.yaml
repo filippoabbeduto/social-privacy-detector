@@ -171,7 +171,10 @@ Resources:
       # di 70s e una chiamata LLM lenta faceva scadere la funzione a meta' lavoro.
       # Alzare qui obbliga ad alzare anche VisibilityTimeout della coda (sopra).
       Timeout: 600
-      MemorySize: 1024
+      # 2048 e non 1024: con spaCy lg (~600 MB) + immagini + ensemble l'uso reale toccava
+      # 1023/1024 MB (a un soffio dall'OOM). Su Lambda la CPU scala con la memoria, quindi
+      # raddoppiarla toglie il rischio OOM E accorcia il tempo di calcolo (ensemble/spaCy).
+      MemorySize: 2048
       Environment:
         Variables:
           AWS_MOCK: "false"
