@@ -1146,12 +1146,10 @@ export default function App() {
               <div className="flex gap-3 pt-1">
                 <button
                   type="button"
-                  onClick={handleClear}
-                  disabled={isLoading}
-                  className="w-1/3 rounded-xl border border-line py-2.5 text-sm font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  onClick={isLoading ? () => { stopPolling(); resetOutcome(); } : handleClear}
+                  className={`w-1/3 rounded-xl border py-2.5 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${isLoading ? "border-high text-high hover:bg-surface2" : "border-line text-muted hover:text-ink hover:bg-surface2"}`}
                 >
-                  <Trash2 className="w-4 h-4" />
-                  Pulisci
+                  {isLoading ? "Annulla analisi" : (<><Trash2 className="w-4 h-4" /> Pulisci</>)}
                 </button>
                 <button
                   type="submit"
@@ -1196,12 +1194,10 @@ export default function App() {
                   <div className="flex gap-3">
                     <button
                       type="button"
-                      onClick={handleClear}
-                      disabled={isLoading}
-                      className="w-1/3 rounded-xl border border-line py-2.5 text-sm font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      onClick={isLoading ? () => { stopPolling(); resetOutcome(); } : handleClear}
+                      className={`w-1/3 rounded-xl border py-2.5 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${isLoading ? "border-high text-high hover:bg-surface2" : "border-line text-muted hover:text-ink hover:bg-surface2"}`}
                     >
-                      <Trash2 className="w-4 h-4" />
-                      Pulisci
+                      {isLoading ? "Annulla analisi" : (<><Trash2 className="w-4 h-4" /> Pulisci</>)}
                     </button>
                     <button
                       type="submit"
@@ -1448,15 +1444,6 @@ export default function App() {
                     </React.Fragment>
                   ))}
                 </div>
-                {/* Annulla = smetti di aspettare. Ferma il polling e torna al form; l'analisi
-                    prosegue lato Lambda (non la si uccide), ma l'utente non resta bloccato. */}
-                <button
-                  type="button"
-                  onClick={() => { stopPolling(); resetOutcome(); }}
-                  className="mt-6 inline-flex items-center gap-1.5 rounded-xl border border-line py-1.5 px-4 text-xs font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Annulla analisi
-                </button>
               </div>
             )}
 
