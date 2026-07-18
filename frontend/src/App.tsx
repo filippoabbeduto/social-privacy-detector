@@ -604,6 +604,7 @@ export default function App() {
   // Versione sicura della bio (feature "bio ripulita").
   const [sanitized, setSanitized] = useState<{ cleaned_text: string; score: number; risk_level: string; removed_types: string[]; kept_types: string[] } | null>(null);
   const [sanitizing, setSanitizing] = useState(false);
+  const [bioCopied, setBioCopied] = useState(false);
   // Espansione della lista di etichette visive (Rekognition ne restituisce decine).
   const [showAllLabels, setShowAllLabels] = useState(false);
   // Espansione delle combinazioni/attacchi sulla mappa dell'aggregazione.
@@ -1726,10 +1727,19 @@ export default function App() {
                           </div>
                           <button
                             type="button"
-                            onClick={() => navigator.clipboard?.writeText(sanitized.cleaned_text)}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-line py-1.5 px-3 text-xs font-semibold text-muted hover:text-ink hover:bg-surface2 transition-colors"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard?.writeText(sanitized.cleaned_text);
+                                setBioCopied(true);
+                                window.setTimeout(() => setBioCopied(false), 1800);
+                              } catch {
+                                // clipboard non disponibile (contesto non sicuro): nessun check
+                              }
+                            }}
+                            aria-live="polite"
+                            className={`inline-flex items-center gap-1.5 rounded-xl border py-1.5 px-3 text-xs font-semibold transition-colors ${bioCopied ? "border-low text-low" : "border-line text-muted hover:text-ink hover:bg-surface2"}`}
                           >
-                            Copia testo
+                            {bioCopied ? (<><Check className="w-3.5 h-3.5" /> Copiato</>) : "Copia testo"}
                           </button>
                         </div>
                         <p className="text-[11px] text-faint">
