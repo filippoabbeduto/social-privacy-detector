@@ -601,12 +601,14 @@ export default function App() {
   const [rescoring, setRescoring] = useState(false);
   // Priorità di bonifica: leva (calo dello score) di ciascuna PII se rimossa.
   const [leverage, setLeverage] = useState<{ base_score: number; items: { type: string; text: string; delta: number }[] } | null>(null);
-  // Esempio didattico del messaggio d'attacco (on-demand, via Ollama).
-  // null = non richiesto; {message} = esito (message vuoto + reason per la diagnosi).
-  const [attackExample, setAttackExample] = useState<{ message: string; reason: string } | null>(null);
+  // Esempio d'attacco e bio ripulita: mappe {analysisId → risultato}, così ogni analisi
+  // conserva i propri derivati e non si perdono cambiando sezione (persistono finché la
+  // pagina resta aperta). Reset naturale: una nuova analisi ha un nuovo analysisId; a pagina
+  // chiusa la mappa sparisce. La variabile derivata (sotto analysisId) lascia INVARIATE
+  // tutte le letture nel render.
+  const [attackByAnalysis, setAttackByAnalysis] = useState<Record<string, { message: string; reason: string }>>({});
   const [loadingExample, setLoadingExample] = useState(false);
-  // Versione sicura della bio (feature "bio ripulita").
-  const [sanitized, setSanitized] = useState<{ cleaned_text: string; score: number; risk_level: string; removed_types: string[]; kept_types: string[] } | null>(null);
+  const [sanitizedByAnalysis, setSanitizedByAnalysis] = useState<Record<string, { cleaned_text: string; score: number; risk_level: string; removed_types: string[]; kept_types: string[] }>>({});
   const [sanitizing, setSanitizing] = useState(false);
   const [bioCopied, setBioCopied] = useState(false);
   // Espansione della lista di etichette visive (Rekognition ne restituisce decine).
@@ -616,6 +618,10 @@ export default function App() {
   // Feedback visivo del drag & drop sull'area di caricamento immagine.
   const [dragOver, setDragOver] = useState(false);
   const analysisId = result?.analysis_id;
+  // Derivati della modalità corrente, letti dalla mappa per-analisi: così le decine di
+  // letture di `sanitized`/`attackExample` nel render restano identiche.
+  const sanitized = analysisId ? (sanitizedByAnalysis[analysisId] ?? null) : null;
+  const attackExample = analysisId ? (attackByAnalysis[analysisId] ?? null) : null;
 
   // Al cambio di risultato (nuova analisi o cambio modalità) reimposta la selezione:
   // di default sono escluse le PII sotto la soglia di confidenza, così il punteggio
@@ -646,8 +652,9 @@ export default function App() {
       setLeverage(null);
     }
     setLive(null);
-    setSanitized(null);
-    setAttackExample(null);
+    // sanitized/attackExample NON si azzerano qui: sono per-analisi (mappa keyed su
+    // analysisId), quindi cambiando sezione restano quelli giusti. Una nuova analisi ha
+    // un analysisId nuovo → la mappa non ha voce → si riparte puliti da sé.
     return () => ac.abort();
   }, [analysisId]);
 
@@ -663,7 +670,10 @@ export default function App() {
         // per il web tier). Vedi SanitizeRequest.
         body: JSON.stringify({ text: source.text, detected_pii: result?.detected_pii || [] }),
       });
-      if (res.ok) setSanitized(await res.json());
+      if (res.ok && analysisId) {
+        const data = await res.json();
+        setSanitizedByAnalysis((prev) => ({ ...prev, [analysisId]: data }));
+      }
     } catch (err) {
       console.error("Sanitize error:", err);
     } finally {
@@ -717,9 +727,9 @@ export default function App() {
         body: JSON.stringify({ pii, vector_label: vector }),
       });
       const data = await res.json();
-      setAttackExample({ message: data.message || "", reason: data.reason || "" });
+      if (analysisId) setAttackByAnalysis((prev) => ({ ...prev, [analysisId]: { message: data.message || "", reason: data.reason || "" } }));
     } catch {
-      setAttackExample({ message: "", reason: "no_response" });
+      if (analysisId) setAttackByAnalysis((prev) => ({ ...prev, [analysisId]: { message: "", reason: "no_response" } }));
     } finally {
       setLoadingExample(false);
     }
