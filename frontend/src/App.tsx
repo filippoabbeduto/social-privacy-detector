@@ -573,7 +573,11 @@ export default function App() {
   // Immagine selezionata ma NON ancora analizzata: l'analisi parte solo al click
   // esplicito su "Analizza", non alla semplice selezione del file.
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Un timer di polling PER MODALITÀ: profilo, bio e immagine possono essere seguiti in
+  // parallelo, perché il backend le elabora già come job indipendenti (SQS + Lambda).
+  const pollingRef = useRef<Record<Mode, ReturnType<typeof setInterval> | null>>({
+    profile: null, bio: null, image: null,
+  });
 
   // Stato dei risultati SEPARATO per ogni modalità: ognuna conserva il proprio
   // esito, così il risultato di una sezione NON compare nelle altre e non va perso
@@ -723,10 +727,13 @@ export default function App() {
 
   // Ferma il polling in corso. Centralizzato perché serve a più handler
   // (cambio modalità, pulisci, esito COMPLETED/FAILED, smontaggio del componente).
-  const stopPolling = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
+  // Senza argomento ferma TUTTI i timer (usato allo smontaggio); con una modalità ferma
+  // solo quella, lasciando proseguire le analisi delle altre sezioni.
+  const stopPolling = (m?: Mode) => {
+    const modes: Mode[] = m ? [m] : (Object.keys(pollingRef.current) as Mode[]);
+    for (const k of modes) {
+      const t = pollingRef.current[k];
+      if (t) { clearInterval(t); pollingRef.current[k] = null; }
     }
   };
   // Riporta la modalità corrente allo stato iniziale (nessun esito, nessun errore).
@@ -746,18 +753,18 @@ export default function App() {
   // l'analisi, così l'esito viene scritto NELLO stato di quella sezione anche se
   // nel frattempo l'utente ne sta guardando un'altra.
   const startPolling = (analysisId: string, m: Mode) => {
-    stopPolling();
-    pollingRef.current = setInterval(async () => {
+    stopPolling(m);
+    pollingRef.current[m] = setInterval(async () => {
       try {
         const res = await fetch(`/api/analysis/${analysisId}`);
         if (!res.ok) throw new Error(`Polling error: ${res.status}`);
         const data: AnalysisResult = await res.json();
         patchState(m, { jobStatus: data.status });
         if (data.status === "COMPLETED") {
-          stopPolling();
+          stopPolling(m);
           patchState(m, { result: data, loading: false });
         } else if (data.status === "FAILED") {
-          stopPolling();
+          stopPolling(m);
           patchState(m, { error: data.error || "Analisi non riuscita.", loading: false });
         }
       } catch (err) {
@@ -1014,7 +1021,7 @@ export default function App() {
   };
 
   const handleClear = () => {
-    stopPolling();
+    stopPolling(mode);
     setSocialUrl("");
     setScrapedContent("");
     setActiveTemplate(null);
@@ -1146,7 +1153,7 @@ export default function App() {
               <div className="flex gap-3 pt-1">
                 <button
                   type="button"
-                  onClick={isLoading ? () => { stopPolling(); resetOutcome(); } : handleClear}
+                  onClick={isLoading ? () => { stopPolling(mode); resetOutcome(); } : handleClear}
                   className={`w-1/3 rounded-xl border py-2.5 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${isLoading ? "border-high text-high hover:bg-surface2" : "border-line text-muted hover:text-ink hover:bg-surface2"}`}
                 >
                   {isLoading ? "Annulla analisi" : (<><Trash2 className="w-4 h-4" /> Pulisci</>)}
@@ -1194,7 +1201,7 @@ export default function App() {
                   <div className="flex gap-3">
                     <button
                       type="button"
-                      onClick={isLoading ? () => { stopPolling(); resetOutcome(); } : handleClear}
+                      onClick={isLoading ? () => { stopPolling(mode); resetOutcome(); } : handleClear}
                       className={`w-1/3 rounded-xl border py-2.5 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${isLoading ? "border-high text-high hover:bg-surface2" : "border-line text-muted hover:text-ink hover:bg-surface2"}`}
                     >
                       {isLoading ? "Annulla analisi" : (<><Trash2 className="w-4 h-4" /> Pulisci</>)}
